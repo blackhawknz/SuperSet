@@ -713,6 +713,12 @@ button {
   min-width: 170px;
 }
 
+.inline-warning {
+  margin: 0 0 10px;
+  color: #fecaca;
+  font-size: 0.9rem;
+}
+
 .detail-strip {
   display: flex;
   flex-wrap: wrap;

@@ -1619,6 +1619,67 @@ function App() {
     [bookings, moveBookingId]
   );
 
+  const bookingConflictNotice = useMemo(() => {
+    if (!bookingClientId) {
+      return '';
+    }
+
+    const startDate = new Date(bookingStartAtInput);
+    if (Number.isNaN(startDate.getTime())) {
+      return '';
+    }
+
+    const duration = Number(bookingDurationMinutes);
+    if (!Number.isFinite(duration) || duration < 15 || duration > 240) {
+      return '';
+    }
+
+    const recurrenceCount = Number(recurringWeeks);
+    if (isRecurringBooking && (!Number.isFinite(recurrenceCount) || recurrenceCount < 2 || recurrenceCount > 52)) {
+      return '';
+    }
+
+    const startAt = startDate.toISOString();
+    const totalOccurrences = isRecurringBooking ? Math.max(2, Math.floor(recurrenceCount)) : 1;
+    const hasConflict = Array.from({ length: totalOccurrences }, (_, index) => {
+      const occurrenceStart = addDaysToIsoDate(startAt, index * 7);
+      return {
+        startAt: occurrenceStart,
+        endAt: addMinutesToIsoDate(occurrenceStart, duration)
+      };
+    }).some((candidate) => hasPlannedBookingOverlap(candidate.startAt, candidate.endAt));
+
+    return hasConflict ? 'Selected time overlaps an existing planned session.' : '';
+  }, [
+    bookingClientId,
+    bookingDurationMinutes,
+    bookingStartAtInput,
+    isRecurringBooking,
+    recurringWeeks,
+    bookings
+  ]);
+
+  const moveBookingConflictNotice = useMemo(() => {
+    if (!moveBookingId) {
+      return '';
+    }
+
+    const startDate = new Date(moveBookingStartAtInput);
+    if (Number.isNaN(startDate.getTime())) {
+      return '';
+    }
+
+    const duration = Number(moveBookingDurationMinutes);
+    if (!Number.isFinite(duration) || duration < 15 || duration > 240) {
+      return '';
+    }
+
+    const startAt = startDate.toISOString();
+    const endAt = addMinutesToIsoDate(startAt, duration);
+    const hasConflict = hasPlannedBookingOverlap(startAt, endAt, moveBookingId);
+    return hasConflict ? 'Moved time overlaps an existing planned session.' : '';
+  }, [bookings, moveBookingDurationMinutes, moveBookingId, moveBookingStartAtInput]);
+
   const todayBookingCount = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -2117,6 +2178,27 @@ function App() {
     downloadCalendarFile(fileLabel, `${client.name} Sessions`, exportable);
   }
 
+  function hasPlannedBookingOverlap(startAt: string, endAt: string, excludedBookingId?: string) {
+    const candidateStart = new Date(startAt).getTime();
+    const candidateEnd = new Date(endAt).getTime();
+    if (Number.isNaN(candidateStart) || Number.isNaN(candidateEnd)) {
+      return false;
+    }
+
+    return bookings.some((existing) => {
+      if (existing.status !== 'planned') {
+        return false;
+      }
+      if (excludedBookingId && existing.id === excludedBookingId) {
+        return false;
+      }
+
+      const existingStart = new Date(existing.startAt).getTime();
+      const existingEnd = new Date(existing.endAt).getTime();
+      return candidateStart < existingEnd && candidateEnd > existingStart;
+    });
+  }
+
   function addBooking() {
     if (!bookingClientId) {
       flash('Select a client before creating a booking.');
@@ -2170,19 +2252,7 @@ function App() {
       });
     });
 
-    const hasConflict = createdBookings.some((candidate) =>
-      bookings.some((existing) => {
-        if (existing.status !== 'planned') {
-          return false;
-        }
-
-        const candidateStart = new Date(candidate.startAt).getTime();
-        const candidateEnd = new Date(candidate.endAt).getTime();
-        const existingStart = new Date(existing.startAt).getTime();
-        const existingEnd = new Date(existing.endAt).getTime();
-        return candidateStart < existingEnd && candidateEnd > existingStart;
-      })
-    );
+    const hasConflict = createdBookings.some((candidate) => hasPlannedBookingOverlap(candidate.startAt, candidate.endAt));
 
     if (hasConflict) {
       flash('This booking overlaps an existing planned session.');
@@ -2245,6 +2315,11 @@ function App() {
       recurrence: 'none'
     });
 
+    if (hasPlannedBookingOverlap(duplicate.startAt, duplicate.endAt)) {
+      flash('Duplicated booking overlaps an existing planned session.');
+      return;
+    }
+
     setBookings((current) => [duplicate, ...current]);
     flash(`Booking duplicated to ${formatDateTime(nextStartAt)}.`);
   }
@@ -2283,17 +2358,7 @@ function App() {
     const startAt = startDate.toISOString();
     const endAt = addMinutesToIsoDate(startAt, duration);
 
-    const hasConflict = bookings.some((booking) => {
-      if (booking.id === moveBookingId || booking.status !== 'planned') {
-        return false;
-      }
-
-      const movedStart = new Date(startAt).getTime();
-      const movedEnd = new Date(endAt).getTime();
-      const existingStart = new Date(booking.startAt).getTime();
-      const existingEnd = new Date(booking.endAt).getTime();
-      return movedStart < existingEnd && movedEnd > existingStart;
-    });
+    const hasConflict = hasPlannedBookingOverlap(startAt, endAt, moveBookingId);
 
     if (hasConflict) {
       flash('Moved booking overlaps an existing planned session.');
@@ -3734,13 +3799,14 @@ function App() {
                         </label>
                       </div>
                       <div className="booking-modal-actions">
-                        <button className="button button-primary" onClick={saveMovedBooking} type="button">
+                        <button className="button button-primary" onClick={saveMovedBooking} type="button" disabled={Boolean(moveBookingConflictNotice)}>
                           Save moved week
                         </button>
                         <button className="button button-secondary" onClick={cancelMoveBooking} type="button">
                           Clear move target
                         </button>
                       </div>
+                      {moveBookingConflictNotice ? <p className="inline-warning">{moveBookingConflictNotice}</p> : null}
                     </section>
                   ) : null}
 
@@ -3804,13 +3870,19 @@ function App() {
                   <Field label="Booking notes" value={bookingNotes} onChange={setBookingNotes} textarea />
 
                   <div className="booking-modal-actions">
-                    <button className="button button-primary" onClick={addBooking} type="button" disabled={!clientOptionValues.length}>
+                    <button
+                      className="button button-primary"
+                      onClick={addBooking}
+                      type="button"
+                      disabled={!clientOptionValues.length || !bookingClientId || Boolean(bookingConflictNotice)}
+                    >
                       {isRecurringBooking ? 'Add recurring booking' : 'Add booking'}
                     </button>
                     <button className="button button-secondary" onClick={closeBookingModal} type="button">
                       Cancel
                     </button>
                   </div>
+                  {bookingConflictNotice ? <p className="inline-warning">{bookingConflictNotice}</p> : null}
                 </section>
               </div>
             ) : null}
