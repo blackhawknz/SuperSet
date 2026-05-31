@@ -2139,6 +2139,34 @@ function App() {
     }
   }
 
+  function duplicateBookingToNextWeek(bookingId: string) {
+    const source = bookings.find((booking) => booking.id === bookingId);
+    if (!source) {
+      flash('Booking not found for duplication.');
+      return;
+    }
+
+    const durationMinutes = Math.max(
+      15,
+      Math.round((new Date(source.endAt).getTime() - new Date(source.startAt).getTime()) / 60000)
+    );
+    const nextStartAt = addDaysToIsoDate(source.startAt, 7);
+
+    const duplicate = normalizeCalendarBooking({
+      ...source,
+      id: createId('booking'),
+      startAt: nextStartAt,
+      endAt: addMinutesToIsoDate(nextStartAt, durationMinutes),
+      status: 'planned',
+      createdAt: new Date().toISOString(),
+      seriesId: '',
+      recurrence: 'none'
+    });
+
+    setBookings((current) => [duplicate, ...current]);
+    flash(`Booking duplicated to ${formatDateTime(nextStartAt)}.`);
+  }
+
   function startMoveBooking(booking: CalendarBooking) {
     const currentDuration = Math.max(15, Math.round((new Date(booking.endAt).getTime() - new Date(booking.startAt).getTime()) / 60000));
     setMoveBookingId(booking.id);
@@ -3345,6 +3373,13 @@ function App() {
                       <div className="session-set-actions">
                         <span className="pill">Planned</span>
                         {booking.recurrence === 'weekly' ? <span className="pill">Weekly</span> : null}
+                        <button
+                          className="button button-secondary compact-button"
+                          onClick={() => duplicateBookingToNextWeek(booking.id)}
+                          type="button"
+                        >
+                          Duplicate +1 week
+                        </button>
                         <button className="button button-secondary compact-button" onClick={() => startMoveBooking(booking)} type="button">
                           Move week
                         </button>
