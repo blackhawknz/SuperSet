@@ -2170,6 +2170,25 @@ function App() {
       });
     });
 
+    const hasConflict = createdBookings.some((candidate) =>
+      bookings.some((existing) => {
+        if (existing.status !== 'planned') {
+          return false;
+        }
+
+        const candidateStart = new Date(candidate.startAt).getTime();
+        const candidateEnd = new Date(candidate.endAt).getTime();
+        const existingStart = new Date(existing.startAt).getTime();
+        const existingEnd = new Date(existing.endAt).getTime();
+        return candidateStart < existingEnd && candidateEnd > existingStart;
+      })
+    );
+
+    if (hasConflict) {
+      flash('This booking overlaps an existing planned session.');
+      return;
+    }
+
     setBookings((current) => [...current, ...createdBookings]);
     setBookingNotes('');
     setBookingTitle('Training Session');
@@ -2262,13 +2281,32 @@ function App() {
     }
 
     const startAt = startDate.toISOString();
+    const endAt = addMinutesToIsoDate(startAt, duration);
+
+    const hasConflict = bookings.some((booking) => {
+      if (booking.id === moveBookingId || booking.status !== 'planned') {
+        return false;
+      }
+
+      const movedStart = new Date(startAt).getTime();
+      const movedEnd = new Date(endAt).getTime();
+      const existingStart = new Date(booking.startAt).getTime();
+      const existingEnd = new Date(booking.endAt).getTime();
+      return movedStart < existingEnd && movedEnd > existingStart;
+    });
+
+    if (hasConflict) {
+      flash('Moved booking overlaps an existing planned session.');
+      return;
+    }
+
     setBookings((current) =>
       current.map((booking) =>
         booking.id === moveBookingId
           ? {
               ...booking,
               startAt,
-              endAt: addMinutesToIsoDate(startAt, duration),
+              endAt,
               status: 'planned'
             }
           : booking
@@ -2312,6 +2350,11 @@ function App() {
 
   function clearExerciseFilters() {
     setExerciseSearch('');
+  }
+
+  function openClientCheckIn(client: Client) {
+    setView('clients');
+    openClientEditor(client);
   }
 
   function clearRecentlyEdited() {
@@ -3814,6 +3857,41 @@ function App() {
                   Clear filters
                 </button>
               </div>
+
+              <section className="tools-attention-block clients-due-card">
+                <div className="section-heading compact">
+                  <div>
+                    <span className="eyebrow">Client workflow</span>
+                    <h3>Due check-ins</h3>
+                  </div>
+                  <span className="pill">{dueCheckInClients.length} due</span>
+                </div>
+
+                <div className="record-list">
+                  {dueCheckInClients.length ? (
+                    dueCheckInClients.slice(0, 6).map((client) => (
+                      <article className="record-row" key={`due-client-${client.id}`}>
+                        <div>
+                          <strong>{client.name}</strong>
+                          <p>{client.goal || 'No goal added'}</p>
+                        </div>
+                        <div className="session-set-actions">
+                          <span className="pill">Due</span>
+                          <button
+                            className="button button-secondary compact-button"
+                            onClick={() => openClientCheckIn(client)}
+                            type="button"
+                          >
+                            Log check-in now
+                          </button>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="empty-copy">No client check-ins due right now.</p>
+                  )}
+                </div>
+              </section>
 
               <div className="item-list">
                 {filteredClients.map((client) => (
