@@ -1754,7 +1754,7 @@ function App() {
   }
 
   function openQuickClientCreate() {
-    openClientEditor(blankClient());
+    openNewClientModal();
     setView('clients');
   }
 
