@@ -1,4 +1,4 @@
-const CACHE_NAME = 'superset-shell-v1';
+const CACHE_NAME = 'superset-shell-v2';
 const APP_SHELL = ['./', './manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
@@ -19,6 +19,39 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') {
+    return;
+  }
+
+  const url = new URL(event.request.url);
+  const isNavigation = event.request.mode === 'navigate';
+  const isAsset = url.pathname.includes('/assets/');
+
+  if (isNavigation) {
+    // Network-first for HTML: always get latest app when online
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./')))
+    );
+    return;
+  }
+
+  if (isAsset) {
+    // Cache-first for hashed assets (they never change content)
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        if (cached) return cached;
+        return fetch(event.request).then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
+        });
+      })
+    );
     return;
   }
 
