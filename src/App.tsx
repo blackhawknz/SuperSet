@@ -175,6 +175,13 @@ const STORAGE_KEYS = {
   dueCheckInDismissals: 'superset.due-checkin-dismissals'
 };
 
+const MOMENT_QUOTES = [
+  '"mini Kratos attak!"',
+  '"Get a haircut, hippy"',
+  '"Lover of Notredame"',
+  '"dingus"'
+];
+
 const PROGRAM_TEMPLATES: Record<ProgramTemplateKey, {
   title: string;
   focus: string;
@@ -1361,6 +1368,9 @@ function App() {
   const [isSecurityDrawerOpen, setIsSecurityDrawerOpen] = useState(false);
   const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
   const [notice, setNotice] = useState('');
+  const [momentQuote] = useState(
+    () => MOMENT_QUOTES[Math.floor(Math.random() * MOMENT_QUOTES.length)]
+  );
   const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -3279,7 +3289,10 @@ function App() {
         <>
       <header className="hero card">
         <div>
-          <h1>Superset</h1>
+          <div className="hero-title-row">
+            <h1>Superset</h1>
+            <span className="moment-quote">{momentQuote}</span>
+          </div>
           <p className="hero-copy">
             Manage client notes, build workout programs, and run a touch-friendly session view from any browser.
             Data stays in the device unless you export it.

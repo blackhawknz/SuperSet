@@ -104,6 +104,29 @@ button {
   line-height: 0.95;
 }
 
+.hero-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+}
+
+.hero-title-row h1 {
+  margin-top: 0;
+}
+
+.moment-quote {
+  margin-left: auto;
+  margin-top: 0;
+  color: #8d9ab0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  font-style: italic;
+  line-height: 1.2;
+  opacity: 0.72;
+}
+
 .hero-copy,
 .section-copy,
 .muted-text,
