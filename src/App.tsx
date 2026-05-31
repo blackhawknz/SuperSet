@@ -1247,6 +1247,26 @@ function serializeExerciseDraft(exercise: Exercise) {
   return JSON.stringify(exercise);
 }
 
+function serializeCreateBookingDraft(payload: {
+  bookingClientId: string;
+  bookingStartAtInput: string;
+  bookingTitle: string;
+  bookingDurationMinutes: string;
+  bookingNotes: string;
+  isRecurringBooking: boolean;
+  recurringWeeks: string;
+}) {
+  return JSON.stringify(payload);
+}
+
+function serializeMoveBookingDraft(payload: {
+  moveBookingId: string;
+  moveBookingStartAtInput: string;
+  moveBookingDurationMinutes: string;
+}) {
+  return JSON.stringify(payload);
+}
+
 function App() {
   const [view, setView] = useState<ViewName>('dashboard');
   const [clients, setClients] = useState<Client[]>(() => {
@@ -1325,6 +1345,8 @@ function App() {
   const [clientModalBaseline, setClientModalBaseline] = useState('');
   const [programModalBaseline, setProgramModalBaseline] = useState('');
   const [exerciseModalBaseline, setExerciseModalBaseline] = useState('');
+  const [createBookingModalBaseline, setCreateBookingModalBaseline] = useState('');
+  const [moveBookingModalBaseline, setMoveBookingModalBaseline] = useState('');
   const [undoSnapshots, setUndoSnapshots] = useState<UndoSnapshot[]>([]);
   const [sessionEditHistory, setSessionEditHistory] = useState<ActiveSession[]>([]);
   const [restTimerSeconds, setRestTimerSeconds] = useState(0);
@@ -1695,6 +1717,20 @@ function App() {
   const isClientDirty = isClientModalOpen && clientModalBaseline !== serializeClientDraft(clientDraft);
   const isProgramDirty = isProgramModalOpen && programModalBaseline !== serializeProgramDraft(programDraft);
   const isExerciseDirty = isExerciseModalOpen && exerciseModalBaseline !== serializeExerciseDraft(exerciseDraft);
+  const isCreateBookingDirty = isBookingModalOpen && !moveBookingTarget && createBookingModalBaseline !== serializeCreateBookingDraft({
+    bookingClientId,
+    bookingStartAtInput,
+    bookingTitle,
+    bookingDurationMinutes,
+    bookingNotes,
+    isRecurringBooking,
+    recurringWeeks
+  });
+  const isMoveBookingDirty = isBookingModalOpen && Boolean(moveBookingTarget) && moveBookingModalBaseline !== serializeMoveBookingDraft({
+    moveBookingId,
+    moveBookingStartAtInput,
+    moveBookingDurationMinutes
+  });
 
   const previousSessionForActive = useMemo(() => {
     if (!activeSession) {
@@ -1919,10 +1955,27 @@ function App() {
 
   function openBookingModalForCreate() {
     cancelMoveBooking();
+    setCreateBookingModalBaseline(serializeCreateBookingDraft({
+      bookingClientId,
+      bookingStartAtInput,
+      bookingTitle,
+      bookingDurationMinutes,
+      bookingNotes,
+      isRecurringBooking,
+      recurringWeeks
+    }));
     setIsBookingModalOpen(true);
   }
 
   function closeBookingModal() {
+    if (moveBookingTarget) {
+      if (isMoveBookingDirty && !window.confirm('Discard unsaved booking move changes?')) {
+        return;
+      }
+    } else if (isCreateBookingDirty && !window.confirm('Discard unsaved booking changes?')) {
+      return;
+    }
+
     cancelMoveBooking();
     setIsBookingModalOpen(false);
   }
@@ -2326,9 +2379,15 @@ function App() {
 
   function startMoveBooking(booking: CalendarBooking) {
     const currentDuration = Math.max(15, Math.round((new Date(booking.endAt).getTime() - new Date(booking.startAt).getTime()) / 60000));
+    const nextStartAtInput = toDateTimeLocalValue(booking.startAt);
     setMoveBookingId(booking.id);
-    setMoveBookingStartAtInput(toDateTimeLocalValue(booking.startAt));
+    setMoveBookingStartAtInput(nextStartAtInput);
     setMoveBookingDurationMinutes(String(currentDuration));
+    setMoveBookingModalBaseline(serializeMoveBookingDraft({
+      moveBookingId: booking.id,
+      moveBookingStartAtInput: nextStartAtInput,
+      moveBookingDurationMinutes: String(currentDuration)
+    }));
     setIsBookingModalOpen(true);
   }
 
@@ -2336,6 +2395,15 @@ function App() {
     setMoveBookingId('');
     setMoveBookingStartAtInput('');
     setMoveBookingDurationMinutes('60');
+    setCreateBookingModalBaseline(serializeCreateBookingDraft({
+      bookingClientId,
+      bookingStartAtInput,
+      bookingTitle,
+      bookingDurationMinutes,
+      bookingNotes,
+      isRecurringBooking,
+      recurringWeeks
+    }));
   }
 
   function saveMovedBooking() {
