@@ -1460,6 +1460,16 @@ function App() {
     );
   }, [exerciseSearch, exercises]);
 
+  const visibleClientCount = showArchivedClients
+    ? clients.length
+    : clients.filter((client) => !client.archived).length;
+  const visibleProgramCount = showArchivedPrograms
+    ? programs.length
+    : programs.filter((program) => !program.archived).length;
+  const hasClientFilters = Boolean(clientSearch.trim()) || showArchivedClients;
+  const hasProgramFilters = Boolean(programSearch.trim()) || showArchivedPrograms;
+  const hasExerciseFilters = Boolean(exerciseSearch.trim());
+
   const bookableClients = useMemo(
     () => clients.filter((client) => !client.archived),
     [clients]
@@ -2180,6 +2190,20 @@ function App() {
 
     setVisibleWeekStartIso(todayWeekIso);
     flash('Showing current week.');
+  }
+
+  function clearClientFilters() {
+    setClientSearch('');
+    setShowArchivedClients(false);
+  }
+
+  function clearProgramFilters() {
+    setProgramSearch('');
+    setShowArchivedPrograms(false);
+  }
+
+  function clearExerciseFilters() {
+    setExerciseSearch('');
   }
 
   function attemptCloseClientModal() {
@@ -3426,6 +3450,18 @@ function App() {
                 <span>Show archived clients</span>
               </label>
 
+              <div className="filter-summary-row">
+                <p className="section-copy">Showing {filteredClients.length} of {visibleClientCount} clients</p>
+                <button
+                  className="button button-secondary compact-button"
+                  onClick={clearClientFilters}
+                  disabled={!hasClientFilters}
+                  type="button"
+                >
+                  Clear filters
+                </button>
+              </div>
+
               <div className="item-list">
                 {filteredClients.map((client) => (
                   <button
@@ -3608,6 +3644,18 @@ function App() {
                 />
                 <span>Show archived programs</span>
               </label>
+
+              <div className="filter-summary-row">
+                <p className="section-copy">Showing {filteredPrograms.length} of {visibleProgramCount} programs</p>
+                <button
+                  className="button button-secondary compact-button"
+                  onClick={clearProgramFilters}
+                  disabled={!hasProgramFilters}
+                  type="button"
+                >
+                  Clear filters
+                </button>
+              </div>
 
               <div className="item-list">
                 {filteredPrograms.map((program) => {
@@ -3980,6 +4028,18 @@ function App() {
                 onChange={(event) => setExerciseSearch(event.target.value)}
                 placeholder="Search exercises by name, category, equipment..."
               />
+
+              <div className="filter-summary-row">
+                <p className="section-copy">Showing {filteredExercises.length} of {exercises.length} exercises</p>
+                <button
+                  className="button button-secondary compact-button"
+                  onClick={clearExerciseFilters}
+                  disabled={!hasExerciseFilters}
+                  type="button"
+                >
+                  Clear search
+                </button>
+              </div>
 
               <div className="item-list">
                 {filteredExercises.map((exercise) => (

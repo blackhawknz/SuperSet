@@ -637,6 +637,18 @@ button {
   height: 18px;
 }
 
+.filter-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.filter-summary-row .section-copy {
+  margin: 0;
+}
+
 .field-textarea {
   min-height: 112px;
   padding: 12px 14px;
