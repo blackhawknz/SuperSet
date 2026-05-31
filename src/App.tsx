@@ -152,6 +152,7 @@ type UndoSnapshot = {
 
 type ProgramTemplateKey = 'strength' | 'hypertrophy' | 'fat-loss';
 type RecentlyEditedEntityType = 'client' | 'program' | 'exercise';
+type RecentlyEditedFilter = 'all' | RecentlyEditedEntityType;
 
 type RecentlyEditedItem = {
   entityType: RecentlyEditedEntityType;
@@ -1308,6 +1309,7 @@ function App() {
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
   const [isProgramModalOpen, setIsProgramModalOpen] = useState(false);
   const [isExerciseModalOpen, setIsExerciseModalOpen] = useState(false);
+  const [recentlyEditedFilter, setRecentlyEditedFilter] = useState<RecentlyEditedFilter>('all');
   const [clientSearch, setClientSearch] = useState('');
   const [programSearch, setProgramSearch] = useState('');
   const [exerciseSearch, setExerciseSearch] = useState('');
@@ -1496,6 +1498,14 @@ function App() {
   const hasClientFilters = Boolean(clientSearch.trim()) || showArchivedClients;
   const hasProgramFilters = Boolean(programSearch.trim()) || showArchivedPrograms;
   const hasExerciseFilters = Boolean(exerciseSearch.trim());
+
+  const filteredRecentlyEdited = useMemo(() => {
+    if (recentlyEditedFilter === 'all') {
+      return recentlyEdited;
+    }
+
+    return recentlyEdited.filter((item) => item.entityType === recentlyEditedFilter);
+  }, [recentlyEdited, recentlyEditedFilter]);
 
   const sessionProgramOptions = useMemo(
     () =>
@@ -2276,6 +2286,11 @@ function App() {
 
   function clearExerciseFilters() {
     setExerciseSearch('');
+  }
+
+  function clearRecentlyEdited() {
+    setRecentlyEdited([]);
+    flash('Recent edits cleared.');
   }
 
   function attemptCloseClientModal() {
@@ -3333,9 +3348,32 @@ function App() {
                 </div>
               </div>
 
+              <div className="recent-edits-controls">
+                <div className="recent-edits-filter-group">
+                  {(['all', 'client', 'program', 'exercise'] as RecentlyEditedFilter[]).map((filterKey) => (
+                    <button
+                      key={filterKey}
+                      className={recentlyEditedFilter === filterKey ? 'button button-secondary compact-button recent-filter-button active' : 'button button-secondary compact-button recent-filter-button'}
+                      onClick={() => setRecentlyEditedFilter(filterKey)}
+                      type="button"
+                    >
+                      {filterKey === 'all' ? 'All' : `${filterKey}s`}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="button button-secondary compact-button"
+                  onClick={clearRecentlyEdited}
+                  disabled={!recentlyEdited.length}
+                  type="button"
+                >
+                  Clear recent
+                </button>
+              </div>
+
               <div className="record-list">
-                {recentlyEdited.length ? (
-                  recentlyEdited.map((item) => (
+                {filteredRecentlyEdited.length ? (
+                  filteredRecentlyEdited.map((item) => (
                     <button
                       className="item-row"
                       key={`${item.entityType}-${item.entityId}`}
@@ -3352,6 +3390,8 @@ function App() {
                       </div>
                     </button>
                   ))
+                ) : recentlyEdited.length ? (
+                  <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
                 ) : (
                   <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
                 )}

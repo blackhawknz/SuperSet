@@ -401,6 +401,29 @@ button {
   font-size: 0.76rem;
 }
 
+.recent-edits-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.recent-edits-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recent-filter-button {
+  min-height: 36px;
+}
+
+.recent-filter-button.active {
+  background: rgba(249, 115, 22, 0.18);
+  border: 1px solid rgba(249, 115, 22, 0.35);
+}
+
 .item-row strong,
 .record-row strong,
 .exercise-block strong,
