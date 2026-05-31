@@ -1332,7 +1332,7 @@ function App() {
 
   useEffect(() => {
     const nextClientId = clients[0]?.id ?? '';
-    if (!selectedClientId && nextClientId) {
+    if (!selectedClientId && nextClientId && !isClientModalOpen) {
       setSelectedClientId(nextClientId);
     }
     if (!sessionClientId && nextClientId) {
@@ -1341,7 +1341,7 @@ function App() {
     if (!bookingClientId && nextClientId) {
       setBookingClientId(nextClientId);
     }
-  }, [bookingClientId, clients, selectedClientId, sessionClientId]);
+  }, [bookingClientId, clients, isClientModalOpen, selectedClientId, sessionClientId]);
 
   useEffect(() => {
     const nextExerciseId = exercises[0]?.id ?? '';
@@ -1650,13 +1650,17 @@ function App() {
   ];
 
   useEffect(() => {
+    if (isClientModalOpen && !selectedClientId) {
+      // Creating a new client — don't override the blank draft with the fallback client
+      return;
+    }
     if (selectedClient && selectedClientId !== selectedClient.id) {
       setSelectedClientId(selectedClient.id);
     }
     if (selectedClient) {
       setClientDraft(selectedClient);
     }
-  }, [selectedClient, selectedClientId]);
+  }, [selectedClient, selectedClientId, isClientModalOpen]);
 
   useEffect(() => {
     if (selectedExercise && selectedExerciseId !== selectedExercise.id) {
