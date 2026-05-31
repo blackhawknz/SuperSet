@@ -3810,79 +3810,83 @@ function App() {
                     </section>
                   ) : null}
 
-                  <div className="form-grid two-up">
-                    <SelectField
-                      label="Client"
-                      value={bookingClientId}
-                      options={clientOptionValues}
-                      onChange={setBookingClientId}
-                    />
-                    <label className="field">
-                      <span>Session date and time</span>
-                      <input
-                        className="field-input"
-                        type="datetime-local"
-                        value={bookingStartAtInput}
-                        onChange={(event) => setBookingStartAtInput(event.target.value)}
-                      />
-                    </label>
-                    <Field label="Session title" value={bookingTitle} onChange={setBookingTitle} />
-                    <label className="field">
-                      <span>Duration (minutes)</span>
-                      <input
-                        className="field-input"
-                        type="number"
-                        min={15}
-                        max={240}
-                        step={5}
-                        value={bookingDurationMinutes}
-                        onChange={(event) => setBookingDurationMinutes(event.target.value)}
-                      />
-                    </label>
-                  </div>
-
-                  <div className="form-grid two-up">
-                    <label className="toggle-row">
-                      <input
-                        checked={isRecurringBooking}
-                        onChange={(event) => setIsRecurringBooking(event.target.checked)}
-                        type="checkbox"
-                      />
-                      <span>Repeat weekly</span>
-                    </label>
-                    {isRecurringBooking ? (
-                      <label className="field">
-                        <span>How many weeks</span>
-                        <input
-                          className="field-input"
-                          type="number"
-                          min={2}
-                          max={52}
-                          value={recurringWeeks}
-                          onChange={(event) => setRecurringWeeks(event.target.value)}
+                  {!moveBookingTarget ? (
+                    <>
+                      <div className="form-grid two-up">
+                        <SelectField
+                          label="Client"
+                          value={bookingClientId}
+                          options={clientOptionValues}
+                          onChange={setBookingClientId}
                         />
-                      </label>
-                    ) : (
-                      <div />
-                    )}
-                  </div>
+                        <label className="field">
+                          <span>Session date and time</span>
+                          <input
+                            className="field-input"
+                            type="datetime-local"
+                            value={bookingStartAtInput}
+                            onChange={(event) => setBookingStartAtInput(event.target.value)}
+                          />
+                        </label>
+                        <Field label="Session title" value={bookingTitle} onChange={setBookingTitle} />
+                        <label className="field">
+                          <span>Duration (minutes)</span>
+                          <input
+                            className="field-input"
+                            type="number"
+                            min={15}
+                            max={240}
+                            step={5}
+                            value={bookingDurationMinutes}
+                            onChange={(event) => setBookingDurationMinutes(event.target.value)}
+                          />
+                        </label>
+                      </div>
 
-                  <Field label="Booking notes" value={bookingNotes} onChange={setBookingNotes} textarea />
+                      <div className="form-grid two-up">
+                        <label className="toggle-row">
+                          <input
+                            checked={isRecurringBooking}
+                            onChange={(event) => setIsRecurringBooking(event.target.checked)}
+                            type="checkbox"
+                          />
+                          <span>Repeat weekly</span>
+                        </label>
+                        {isRecurringBooking ? (
+                          <label className="field">
+                            <span>How many weeks</span>
+                            <input
+                              className="field-input"
+                              type="number"
+                              min={2}
+                              max={52}
+                              value={recurringWeeks}
+                              onChange={(event) => setRecurringWeeks(event.target.value)}
+                            />
+                          </label>
+                        ) : (
+                          <div />
+                        )}
+                      </div>
 
-                  <div className="booking-modal-actions">
-                    <button
-                      className="button button-primary"
-                      onClick={addBooking}
-                      type="button"
-                      disabled={!clientOptionValues.length || !bookingClientId || Boolean(bookingConflictNotice)}
-                    >
-                      {isRecurringBooking ? 'Add recurring booking' : 'Add booking'}
-                    </button>
-                    <button className="button button-secondary" onClick={closeBookingModal} type="button">
-                      Cancel
-                    </button>
-                  </div>
-                  {bookingConflictNotice ? <p className="inline-warning">{bookingConflictNotice}</p> : null}
+                      <Field label="Booking notes" value={bookingNotes} onChange={setBookingNotes} textarea />
+
+                      <div className="booking-modal-actions">
+                        <button
+                          className="button button-primary"
+                          onClick={addBooking}
+                          type="button"
+                          disabled={!clientOptionValues.length || !bookingClientId || Boolean(bookingConflictNotice)}
+                        >
+                          {isRecurringBooking ? 'Add recurring booking' : 'Add booking'}
+                        </button>
+                        <button className="button button-secondary" onClick={closeBookingModal} type="button">
+                          Cancel
+                        </button>
+                      </div>
+                      {bookingConflictNotice ? <p className="inline-warning">{bookingConflictNotice}</p> : null}
+                    </>
+                  ) : null}
                 </section>
               </div>
             ) : null}
