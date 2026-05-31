@@ -390,6 +390,44 @@ button {
   border-color: rgba(249, 115, 22, 0.35);
 }
 
+.recent-item-meta {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.recent-item-meta .muted-text {
+  margin: 0;
+  font-size: 0.76rem;
+}
+
+.recent-edits-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.recent-edits-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recent-filter-button {
+  min-height: 36px;
+}
+
+.recent-filter-button.active {
+  background: rgba(249, 115, 22, 0.18);
+  border: 1px solid rgba(249, 115, 22, 0.35);
+}
+
+.clients-due-card {
+  margin-bottom: 12px;
+}
+
 .item-row strong,
 .record-row strong,
 .exercise-block strong,
@@ -637,6 +675,18 @@ button {
   height: 18px;
 }
 
+.filter-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.filter-summary-row .section-copy {
+  margin: 0;
+}
+
 .field-textarea {
   min-height: 112px;
   padding: 12px 14px;
@@ -661,6 +711,12 @@ button {
 .calendar-actions-row .button,
 .booking-modal-actions .button {
   min-width: 170px;
+}
+
+.inline-warning {
+  margin: 0 0 10px;
+  color: #fecaca;
+  font-size: 0.9rem;
 }
 
 .detail-strip {

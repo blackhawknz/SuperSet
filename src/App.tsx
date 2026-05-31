@@ -151,6 +151,18 @@ type UndoSnapshot = {
 };
 
 type ProgramTemplateKey = 'strength' | 'hypertrophy' | 'fat-loss';
+type RecentlyEditedEntityType = 'client' | 'program' | 'exercise';
+type RecentlyEditedFilter = 'all' | RecentlyEditedEntityType;
+
+type RecentlyEditedItem = {
+  entityType: RecentlyEditedEntityType;
+  entityId: string;
+  label: string;
+  detail: string;
+  editedAt: string;
+};
+
+type DueCheckInDismissals = Record<string, string>;
 
 const STORAGE_KEYS = {
   clients: 'superset.clients',
@@ -158,7 +170,9 @@ const STORAGE_KEYS = {
   programs: 'superset.programs',
   sessions: 'superset.sessions',
   bookings: 'superset.bookings',
-  lockHash: 'superset.lock.hash'
+  lockHash: 'superset.lock.hash',
+  recentlyEdited: 'superset.recently-edited',
+  dueCheckInDismissals: 'superset.due-checkin-dismissals'
 };
 
 const PROGRAM_TEMPLATES: Record<ProgramTemplateKey, {
@@ -1233,6 +1247,26 @@ function serializeExerciseDraft(exercise: Exercise) {
   return JSON.stringify(exercise);
 }
 
+function serializeCreateBookingDraft(payload: {
+  bookingClientId: string;
+  bookingStartAtInput: string;
+  bookingTitle: string;
+  bookingDurationMinutes: string;
+  bookingNotes: string;
+  isRecurringBooking: boolean;
+  recurringWeeks: string;
+}) {
+  return JSON.stringify(payload);
+}
+
+function serializeMoveBookingDraft(payload: {
+  moveBookingId: string;
+  moveBookingStartAtInput: string;
+  moveBookingDurationMinutes: string;
+}) {
+  return JSON.stringify(payload);
+}
+
 function App() {
   const [view, setView] = useState<ViewName>('dashboard');
   const [clients, setClients] = useState<Client[]>(() => {
@@ -1259,6 +1293,22 @@ function App() {
     const stored = loadCollection<CalendarBooking[]>(STORAGE_KEYS.bookings, seedBookings);
     return stored.map((booking) => normalizeCalendarBooking(booking));
   });
+  const [recentlyEdited, setRecentlyEdited] = useState<RecentlyEditedItem[]>(() => {
+    const stored = loadCollection<RecentlyEditedItem[]>(STORAGE_KEYS.recentlyEdited, []);
+    return stored
+      .filter((item) =>
+        Boolean(
+          item &&
+          item.entityId &&
+          item.label &&
+          (item.entityType === 'client' || item.entityType === 'program' || item.entityType === 'exercise')
+        )
+      )
+      .slice(0, 8);
+  });
+  const [dueCheckInDismissals, setDueCheckInDismissals] = useState<DueCheckInDismissals>(() =>
+    loadCollection<DueCheckInDismissals>(STORAGE_KEYS.dueCheckInDismissals, {})
+  );
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
 
   const [clientDraft, setClientDraft] = useState<Client>(blankClient());
@@ -1285,6 +1335,7 @@ function App() {
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
   const [isProgramModalOpen, setIsProgramModalOpen] = useState(false);
   const [isExerciseModalOpen, setIsExerciseModalOpen] = useState(false);
+  const [recentlyEditedFilter, setRecentlyEditedFilter] = useState<RecentlyEditedFilter>('all');
   const [clientSearch, setClientSearch] = useState('');
   const [programSearch, setProgramSearch] = useState('');
   const [exerciseSearch, setExerciseSearch] = useState('');
@@ -1294,6 +1345,8 @@ function App() {
   const [clientModalBaseline, setClientModalBaseline] = useState('');
   const [programModalBaseline, setProgramModalBaseline] = useState('');
   const [exerciseModalBaseline, setExerciseModalBaseline] = useState('');
+  const [createBookingModalBaseline, setCreateBookingModalBaseline] = useState('');
+  const [moveBookingModalBaseline, setMoveBookingModalBaseline] = useState('');
   const [undoSnapshots, setUndoSnapshots] = useState<UndoSnapshot[]>([]);
   const [sessionEditHistory, setSessionEditHistory] = useState<ActiveSession[]>([]);
   const [restTimerSeconds, setRestTimerSeconds] = useState(0);
@@ -1331,6 +1384,14 @@ function App() {
   }, [bookings]);
 
   useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.recentlyEdited, JSON.stringify(recentlyEdited));
+  }, [recentlyEdited]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.dueCheckInDismissals, JSON.stringify(dueCheckInDismissals));
+  }, [dueCheckInDismissals]);
+
+  useEffect(() => {
     const nextClientId = clients[0]?.id ?? '';
     if (!selectedClientId && nextClientId && !isClientModalOpen) {
       setSelectedClientId(nextClientId);
@@ -1345,7 +1406,7 @@ function App() {
 
   useEffect(() => {
     const nextExerciseId = exercises[0]?.id ?? '';
-    if (!selectedExerciseId && nextExerciseId) {
+    if (!selectedExerciseId && nextExerciseId && !isExerciseModalOpen) {
       setSelectedExerciseId(nextExerciseId);
     }
     if (programDraft.exercises.length === 0 && nextExerciseId) {
@@ -1354,7 +1415,7 @@ function App() {
         exercises: [blankProgram(current.clientId || clients[0]?.id || '', nextExerciseId).exercises[0]]
       }));
     }
-  }, [clients, exercises, programDraft.exercises.length, selectedExerciseId]);
+  }, [clients, exercises, isExerciseModalOpen, programDraft.exercises.length, selectedExerciseId]);
 
   useEffect(() => {
     const nextProgramId =
@@ -1460,6 +1521,37 @@ function App() {
     );
   }, [exerciseSearch, exercises]);
 
+  const visibleClientCount = showArchivedClients
+    ? clients.length
+    : clients.filter((client) => !client.archived).length;
+  const visibleProgramCount = showArchivedPrograms
+    ? programs.length
+    : programs.filter((program) => !program.archived).length;
+  const hasClientFilters = Boolean(clientSearch.trim()) || showArchivedClients;
+  const hasProgramFilters = Boolean(programSearch.trim()) || showArchivedPrograms;
+  const hasExerciseFilters = Boolean(exerciseSearch.trim());
+
+  const filteredRecentlyEdited = useMemo(() => {
+    if (recentlyEditedFilter === 'all') {
+      return recentlyEdited;
+    }
+
+    return recentlyEdited.filter((item) => item.entityType === recentlyEditedFilter);
+  }, [recentlyEdited, recentlyEditedFilter]);
+
+  const sessionProgramOptions = useMemo(
+    () =>
+      programs
+        .filter((program) => !program.archived)
+        .filter((program) => program.clientId === sessionClientId || !sessionClientId)
+        .map((program) => ({ value: program.id, label: program.title })),
+    [programs, sessionClientId]
+  );
+
+  const hasSessionProgramsForClient = programs.some(
+    (program) => program.clientId === sessionClientId && !program.archived
+  );
+
   const bookableClients = useMemo(
     () => clients.filter((client) => !client.archived),
     [clients]
@@ -1549,6 +1641,67 @@ function App() {
     [bookings, moveBookingId]
   );
 
+  const bookingConflictNotice = useMemo(() => {
+    if (!bookingClientId) {
+      return '';
+    }
+
+    const startDate = new Date(bookingStartAtInput);
+    if (Number.isNaN(startDate.getTime())) {
+      return '';
+    }
+
+    const duration = Number(bookingDurationMinutes);
+    if (!Number.isFinite(duration) || duration < 15 || duration > 240) {
+      return '';
+    }
+
+    const recurrenceCount = Number(recurringWeeks);
+    if (isRecurringBooking && (!Number.isFinite(recurrenceCount) || recurrenceCount < 2 || recurrenceCount > 52)) {
+      return '';
+    }
+
+    const startAt = startDate.toISOString();
+    const totalOccurrences = isRecurringBooking ? Math.max(2, Math.floor(recurrenceCount)) : 1;
+    const hasConflict = Array.from({ length: totalOccurrences }, (_, index) => {
+      const occurrenceStart = addDaysToIsoDate(startAt, index * 7);
+      return {
+        startAt: occurrenceStart,
+        endAt: addMinutesToIsoDate(occurrenceStart, duration)
+      };
+    }).some((candidate) => hasPlannedBookingOverlap(candidate.startAt, candidate.endAt));
+
+    return hasConflict ? 'Selected time overlaps an existing planned session.' : '';
+  }, [
+    bookingClientId,
+    bookingDurationMinutes,
+    bookingStartAtInput,
+    isRecurringBooking,
+    recurringWeeks,
+    bookings
+  ]);
+
+  const moveBookingConflictNotice = useMemo(() => {
+    if (!moveBookingId) {
+      return '';
+    }
+
+    const startDate = new Date(moveBookingStartAtInput);
+    if (Number.isNaN(startDate.getTime())) {
+      return '';
+    }
+
+    const duration = Number(moveBookingDurationMinutes);
+    if (!Number.isFinite(duration) || duration < 15 || duration > 240) {
+      return '';
+    }
+
+    const startAt = startDate.toISOString();
+    const endAt = addMinutesToIsoDate(startAt, duration);
+    const hasConflict = hasPlannedBookingOverlap(startAt, endAt, moveBookingId);
+    return hasConflict ? 'Moved time overlaps an existing planned session.' : '';
+  }, [bookings, moveBookingDurationMinutes, moveBookingId, moveBookingStartAtInput]);
+
   const todayBookingCount = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -1564,6 +1717,20 @@ function App() {
   const isClientDirty = isClientModalOpen && clientModalBaseline !== serializeClientDraft(clientDraft);
   const isProgramDirty = isProgramModalOpen && programModalBaseline !== serializeProgramDraft(programDraft);
   const isExerciseDirty = isExerciseModalOpen && exerciseModalBaseline !== serializeExerciseDraft(exerciseDraft);
+  const isCreateBookingDirty = isBookingModalOpen && !moveBookingTarget && createBookingModalBaseline !== serializeCreateBookingDraft({
+    bookingClientId,
+    bookingStartAtInput,
+    bookingTitle,
+    bookingDurationMinutes,
+    bookingNotes,
+    isRecurringBooking,
+    recurringWeeks
+  });
+  const isMoveBookingDirty = isBookingModalOpen && Boolean(moveBookingTarget) && moveBookingModalBaseline !== serializeMoveBookingDraft({
+    moveBookingId,
+    moveBookingStartAtInput,
+    moveBookingDurationMinutes
+  });
 
   const previousSessionForActive = useMemo(() => {
     if (!activeSession) {
@@ -1577,21 +1744,38 @@ function App() {
 
   const liveCompletedSets = activeSession ? totalCompletedSets(activeSession.entries) : 0;
 
-  const dueCheckInClients = useMemo(() => {
+  const dueCheckInClientEntries = useMemo(() => {
     const now = Date.now();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 
     return clients
       .filter((client) => !client.archived)
-      .filter((client) => {
+      .flatMap((client) => {
         const latestCheckIn = client.checkIns.slice(-1)[0];
         if (!latestCheckIn) {
-          return true;
+          return [{ client, marker: 'none' }];
         }
 
-        return now - new Date(latestCheckIn.recordedAt).getTime() > sevenDaysMs;
+        if (now - new Date(latestCheckIn.recordedAt).getTime() <= sevenDaysMs) {
+          return [];
+        }
+
+        return [{ client, marker: latestCheckIn.recordedAt }];
       });
   }, [clients]);
+
+  const dueCheckInClients = useMemo(
+    () => dueCheckInClientEntries.map((entry) => entry.client),
+    [dueCheckInClientEntries]
+  );
+
+  const dueCheckInCount = useMemo(
+    () =>
+      dueCheckInClientEntries.filter(
+        (entry) => dueCheckInDismissals[entry.client.id] !== entry.marker
+      ).length,
+    [dueCheckInClientEntries, dueCheckInDismissals]
+  );
 
   const sessionTrendRows = useMemo(() => {
     const bucket = new Map<string, { label: string; completedSets: number; totalReps: number; totalLoadKg: number }>();
@@ -1629,7 +1813,6 @@ function App() {
     return max <= 0 ? 1 : max;
   }, [sessionTrendRows]);
 
-  const dueCheckInCount = dueCheckInClients.length;
   const hasUndoPending = undoSnapshots.length > 0;
 
   const pendingToolsCount = useMemo(() => {
@@ -1663,13 +1846,17 @@ function App() {
   }, [selectedClient, selectedClientId, isClientModalOpen]);
 
   useEffect(() => {
+    if (isExerciseModalOpen && !selectedExerciseId) {
+      // Creating a new exercise — don't replace the blank draft with fallback selection.
+      return;
+    }
     if (selectedExercise && selectedExerciseId !== selectedExercise.id) {
       setSelectedExerciseId(selectedExercise.id);
     }
     if (selectedExercise) {
       setExerciseDraft(selectedExercise);
     }
-  }, [selectedExercise, selectedExerciseId]);
+  }, [isExerciseModalOpen, selectedExercise, selectedExerciseId]);
 
   useEffect(() => {
     if (selectedProgram && selectedProgramId !== selectedProgram.id) {
@@ -1768,10 +1955,27 @@ function App() {
 
   function openBookingModalForCreate() {
     cancelMoveBooking();
+    setCreateBookingModalBaseline(serializeCreateBookingDraft({
+      bookingClientId,
+      bookingStartAtInput,
+      bookingTitle,
+      bookingDurationMinutes,
+      bookingNotes,
+      isRecurringBooking,
+      recurringWeeks
+    }));
     setIsBookingModalOpen(true);
   }
 
   function closeBookingModal() {
+    if (moveBookingTarget) {
+      if (isMoveBookingDirty && !window.confirm('Discard unsaved booking move changes?')) {
+        return;
+      }
+    } else if (isCreateBookingDirty && !window.confirm('Discard unsaved booking changes?')) {
+      return;
+    }
+
     cancelMoveBooking();
     setIsBookingModalOpen(false);
   }
@@ -2027,6 +2231,27 @@ function App() {
     downloadCalendarFile(fileLabel, `${client.name} Sessions`, exportable);
   }
 
+  function hasPlannedBookingOverlap(startAt: string, endAt: string, excludedBookingId?: string) {
+    const candidateStart = new Date(startAt).getTime();
+    const candidateEnd = new Date(endAt).getTime();
+    if (Number.isNaN(candidateStart) || Number.isNaN(candidateEnd)) {
+      return false;
+    }
+
+    return bookings.some((existing) => {
+      if (existing.status !== 'planned') {
+        return false;
+      }
+      if (excludedBookingId && existing.id === excludedBookingId) {
+        return false;
+      }
+
+      const existingStart = new Date(existing.startAt).getTime();
+      const existingEnd = new Date(existing.endAt).getTime();
+      return candidateStart < existingEnd && candidateEnd > existingStart;
+    });
+  }
+
   function addBooking() {
     if (!bookingClientId) {
       flash('Select a client before creating a booking.');
@@ -2080,6 +2305,13 @@ function App() {
       });
     });
 
+    const hasConflict = createdBookings.some((candidate) => hasPlannedBookingOverlap(candidate.startAt, candidate.endAt));
+
+    if (hasConflict) {
+      flash('This booking overlaps an existing planned session.');
+      return;
+    }
+
     setBookings((current) => [...current, ...createdBookings]);
     setBookingNotes('');
     setBookingTitle('Training Session');
@@ -2112,11 +2344,50 @@ function App() {
     }
   }
 
+  function duplicateBookingToNextWeek(bookingId: string) {
+    const source = bookings.find((booking) => booking.id === bookingId);
+    if (!source) {
+      flash('Booking not found for duplication.');
+      return;
+    }
+
+    const durationMinutes = Math.max(
+      15,
+      Math.round((new Date(source.endAt).getTime() - new Date(source.startAt).getTime()) / 60000)
+    );
+    const nextStartAt = addDaysToIsoDate(source.startAt, 7);
+
+    const duplicate = normalizeCalendarBooking({
+      ...source,
+      id: createId('booking'),
+      startAt: nextStartAt,
+      endAt: addMinutesToIsoDate(nextStartAt, durationMinutes),
+      status: 'planned',
+      createdAt: new Date().toISOString(),
+      seriesId: '',
+      recurrence: 'none'
+    });
+
+    if (hasPlannedBookingOverlap(duplicate.startAt, duplicate.endAt)) {
+      flash('Duplicated booking overlaps an existing planned session.');
+      return;
+    }
+
+    setBookings((current) => [duplicate, ...current]);
+    flash(`Booking duplicated to ${formatDateTime(nextStartAt)}.`);
+  }
+
   function startMoveBooking(booking: CalendarBooking) {
     const currentDuration = Math.max(15, Math.round((new Date(booking.endAt).getTime() - new Date(booking.startAt).getTime()) / 60000));
+    const nextStartAtInput = toDateTimeLocalValue(booking.startAt);
     setMoveBookingId(booking.id);
-    setMoveBookingStartAtInput(toDateTimeLocalValue(booking.startAt));
+    setMoveBookingStartAtInput(nextStartAtInput);
     setMoveBookingDurationMinutes(String(currentDuration));
+    setMoveBookingModalBaseline(serializeMoveBookingDraft({
+      moveBookingId: booking.id,
+      moveBookingStartAtInput: nextStartAtInput,
+      moveBookingDurationMinutes: String(currentDuration)
+    }));
     setIsBookingModalOpen(true);
   }
 
@@ -2124,6 +2395,15 @@ function App() {
     setMoveBookingId('');
     setMoveBookingStartAtInput('');
     setMoveBookingDurationMinutes('60');
+    setCreateBookingModalBaseline(serializeCreateBookingDraft({
+      bookingClientId,
+      bookingStartAtInput,
+      bookingTitle,
+      bookingDurationMinutes,
+      bookingNotes,
+      isRecurringBooking,
+      recurringWeeks
+    }));
   }
 
   function saveMovedBooking() {
@@ -2144,13 +2424,22 @@ function App() {
     }
 
     const startAt = startDate.toISOString();
+    const endAt = addMinutesToIsoDate(startAt, duration);
+
+    const hasConflict = hasPlannedBookingOverlap(startAt, endAt, moveBookingId);
+
+    if (hasConflict) {
+      flash('Moved booking overlaps an existing planned session.');
+      return;
+    }
+
     setBookings((current) =>
       current.map((booking) =>
         booking.id === moveBookingId
           ? {
               ...booking,
               startAt,
-              endAt: addMinutesToIsoDate(startAt, duration),
+              endAt,
               status: 'planned'
             }
           : booking
@@ -2182,6 +2471,46 @@ function App() {
     flash('Showing current week.');
   }
 
+  function clearClientFilters() {
+    setClientSearch('');
+    setShowArchivedClients(false);
+  }
+
+  function clearProgramFilters() {
+    setProgramSearch('');
+    setShowArchivedPrograms(false);
+  }
+
+  function clearExerciseFilters() {
+    setExerciseSearch('');
+  }
+
+  function openClientCheckIn(client: Client) {
+    setView('clients');
+    openClientEditor(client);
+  }
+
+  function clearRecentlyEdited() {
+    setRecentlyEdited([]);
+    flash('Recent edits cleared.');
+  }
+
+  function markDueCheckInsReviewed() {
+    if (!dueCheckInClientEntries.length) {
+      flash('No due check-ins right now.');
+      return;
+    }
+
+    setDueCheckInDismissals((current) => {
+      const next = { ...current };
+      dueCheckInClientEntries.forEach((entry) => {
+        next[entry.client.id] = entry.marker;
+      });
+      return next;
+    });
+    flash('Due check-ins marked as reviewed.');
+  }
+
   function attemptCloseClientModal() {
     if (isClientDirty && !window.confirm('Discard unsaved client changes?')) {
       return;
@@ -2206,7 +2535,71 @@ function App() {
     setIsExerciseModalOpen(false);
   }
 
-  function saveClient() {
+  function trackRecentlyEdited(item: Omit<RecentlyEditedItem, 'editedAt'>) {
+    const nextItem: RecentlyEditedItem = {
+      ...item,
+      editedAt: new Date().toISOString()
+    };
+
+    setRecentlyEdited((current) => {
+      const deduped = current.filter(
+        (entry) => !(entry.entityType === nextItem.entityType && entry.entityId === nextItem.entityId)
+      );
+      return [nextItem, ...deduped].slice(0, 8);
+    });
+  }
+
+  function openRecentlyEditedItem(item: RecentlyEditedItem) {
+    if (item.entityType === 'client') {
+      const client = clients.find((entry) => entry.id === item.entityId);
+      if (!client) {
+        setRecentlyEdited((current) =>
+          current.filter(
+            (entry) => !(entry.entityType === item.entityType && entry.entityId === item.entityId)
+          )
+        );
+        flash('Client no longer exists. Removed from recently edited.');
+        return;
+      }
+
+      setView('clients');
+      openClientEditor(client);
+      return;
+    }
+
+    if (item.entityType === 'program') {
+      const program = programs.find((entry) => entry.id === item.entityId);
+      if (!program) {
+        setRecentlyEdited((current) =>
+          current.filter(
+            (entry) => !(entry.entityType === item.entityType && entry.entityId === item.entityId)
+          )
+        );
+        flash('Program no longer exists. Removed from recently edited.');
+        return;
+      }
+
+      setView('programs');
+      openProgramEditor(program);
+      return;
+    }
+
+    const exercise = exercises.find((entry) => entry.id === item.entityId);
+    if (!exercise) {
+      setRecentlyEdited((current) =>
+        current.filter(
+          (entry) => !(entry.entityType === item.entityType && entry.entityId === item.entityId)
+        )
+      );
+      flash('Exercise no longer exists. Removed from recently edited.');
+      return;
+    }
+
+    setView('library');
+    openExerciseEditor(exercise);
+  }
+
+  function saveClient(saveAndAddAnother = false) {
     if (!clientDraft.name.trim()) {
       flash('Add a client name first.');
       return;
@@ -2233,6 +2626,14 @@ function App() {
       ...recordBase,
       measurementHistory
     };
+
+    trackRecentlyEdited({
+      entityType: 'client',
+      entityId: record.id,
+      label: record.name,
+      detail: record.status || 'Client'
+    });
+
     setClients((current) => {
       const existingIndex = current.findIndex((client) => client.id === record.id);
       if (existingIndex >= 0) {
@@ -2242,6 +2643,13 @@ function App() {
       }
       return [record, ...current];
     });
+
+    if (saveAndAddAnother) {
+      openNewClientModal();
+      flash('Client saved. Ready to add another.');
+      return;
+    }
+
     setClientDraft(record);
     setSelectedClientId(record.id);
     setIsClientModalOpen(false);
@@ -2324,13 +2732,21 @@ function App() {
     setIsClientModalOpen(true);
   }
 
-  function saveExercise() {
+  function saveExercise(saveAndAddAnother = false) {
     if (!exerciseDraft.name.trim()) {
       flash('Add an exercise name first.');
       return;
     }
 
     const record = { ...exerciseDraft, id: exerciseDraft.id || createId('exercise') };
+
+    trackRecentlyEdited({
+      entityType: 'exercise',
+      entityId: record.id,
+      label: record.name,
+      detail: record.category || record.equipment || 'Exercise'
+    });
+
     setExercises((current) => {
       const existingIndex = current.findIndex((exercise) => exercise.id === record.id);
       if (existingIndex >= 0) {
@@ -2340,6 +2756,13 @@ function App() {
       }
       return [record, ...current];
     });
+
+    if (saveAndAddAnother) {
+      openNewExerciseModal();
+      flash('Exercise saved. Ready to add another.');
+      return;
+    }
+
     setExerciseDraft(record);
     setSelectedExerciseId(record.id);
     setIsExerciseModalOpen(false);
@@ -2395,6 +2818,14 @@ function App() {
       id: programDraft.id || createId('program'),
       exercises: programDraft.exercises.length ? programDraft.exercises : blankProgram(programDraft.clientId, exercises[0]?.id ?? '').exercises
     };
+
+    const recordClientName = clients.find((client) => client.id === record.clientId)?.name ?? 'Unassigned client';
+    trackRecentlyEdited({
+      entityType: 'program',
+      entityId: record.id,
+      label: record.title,
+      detail: recordClientName
+    });
 
     setPrograms((current) => {
       const existingIndex = current.findIndex((program) => program.id === record.id);
@@ -2465,6 +2896,14 @@ function App() {
       exercises: source.exercises.map((exercise) => ({ ...exercise, id: createId('prog-ex') }))
     };
 
+    const copyClientName = clients.find((client) => client.id === copy.clientId)?.name ?? 'Unassigned client';
+    trackRecentlyEdited({
+      entityType: 'program',
+      entityId: copy.id,
+      label: copy.title,
+      detail: copyClientName
+    });
+
     setPrograms((current) => [copy, ...current]);
     setSelectedProgramId(copy.id);
     setSessionProgramId(copy.id);
@@ -2516,6 +2955,43 @@ function App() {
     });
     setSessionEditHistory([]);
     flash('Session ready.');
+  }
+
+  function pickRecentProgramForSessionClient() {
+    if (!sessionClientId) {
+      flash('Pick a client first.');
+      return;
+    }
+
+    const activeProgramsForClient = programs.filter(
+      (program) => program.clientId === sessionClientId && !program.archived
+    );
+    if (!activeProgramsForClient.length) {
+      flash('No active programs available for this client.');
+      return;
+    }
+
+    const activeProgramIds = new Set(activeProgramsForClient.map((program) => program.id));
+    const recentProgramId = sessionHistory.find(
+      (record) => record.clientId === sessionClientId && activeProgramIds.has(record.programId)
+    )?.programId;
+
+    const fallbackProgramId = activeProgramsForClient[0]?.id ?? '';
+    const targetProgramId = recentProgramId ?? fallbackProgramId;
+    const targetProgram = programs.find((program) => program.id === targetProgramId);
+
+    if (!targetProgram) {
+      flash('Unable to load a program for this client.');
+      return;
+    }
+
+    setSessionProgramId(targetProgram.id);
+    if (recentProgramId) {
+      flash(`Loaded recent program: ${targetProgram.title}.`);
+      return;
+    }
+
+    flash(`No recent session found. Loaded: ${targetProgram.title}.`);
   }
 
   function setPresetReps(entryId: string, setIndex: number, reps: string) {
@@ -2893,12 +3369,24 @@ function App() {
                       <button
                         className="button button-secondary"
                         onClick={() => {
-                          setView('dashboard');
+                          setView('clients');
                           setIsMobileToolsOpen(false);
                         }}
                         type="button"
                       >
                         Review due check-ins
+                      </button>
+                    ) : null}
+                    {dueCheckInCount ? (
+                      <button
+                        className="button button-secondary"
+                        onClick={() => {
+                          markDueCheckInsReviewed();
+                          setIsMobileToolsOpen(false);
+                        }}
+                        type="button"
+                      >
+                        Mark reviewed
                       </button>
                     ) : null}
                     {hasUndoPending ? (
@@ -3085,6 +3573,64 @@ function App() {
             <section className="panel card">
               <div className="section-heading compact">
                 <div>
+                  <span className="eyebrow">Recent edits</span>
+                  <h2>Jump back in fast</h2>
+                </div>
+              </div>
+
+              <div className="recent-edits-controls">
+                <div className="recent-edits-filter-group">
+                  {(['all', 'client', 'program', 'exercise'] as RecentlyEditedFilter[]).map((filterKey) => (
+                    <button
+                      key={filterKey}
+                      className={recentlyEditedFilter === filterKey ? 'button button-secondary compact-button recent-filter-button active' : 'button button-secondary compact-button recent-filter-button'}
+                      onClick={() => setRecentlyEditedFilter(filterKey)}
+                      type="button"
+                    >
+                      {filterKey === 'all' ? 'All' : `${filterKey}s`}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="button button-secondary compact-button"
+                  onClick={clearRecentlyEdited}
+                  disabled={!recentlyEdited.length}
+                  type="button"
+                >
+                  Clear recent
+                </button>
+              </div>
+
+              <div className="record-list">
+                {filteredRecentlyEdited.length ? (
+                  filteredRecentlyEdited.map((item) => (
+                    <button
+                      className="item-row"
+                      key={`${item.entityType}-${item.entityId}`}
+                      onClick={() => openRecentlyEditedItem(item)}
+                      type="button"
+                    >
+                      <div>
+                        <strong>{item.label}</strong>
+                        <p>{item.detail}</p>
+                      </div>
+                      <div className="recent-item-meta">
+                        <span className="pill">{item.entityType}</span>
+                        <span className="muted-text">{formatDateTime(item.editedAt)}</span>
+                      </div>
+                    </button>
+                  ))
+                ) : recentlyEdited.length ? (
+                  <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
+                ) : (
+                  <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="panel card">
+              <div className="section-heading compact">
+                <div>
                   <span className="eyebrow">Weekly reminders</span>
                   <h2>Check-ins due</h2>
                 </div>
@@ -3253,6 +3799,13 @@ function App() {
                       <div className="session-set-actions">
                         <span className="pill">Planned</span>
                         {booking.recurrence === 'weekly' ? <span className="pill">Weekly</span> : null}
+                        <button
+                          className="button button-secondary compact-button"
+                          onClick={() => duplicateBookingToNextWeek(booking.id)}
+                          type="button"
+                        >
+                          Duplicate +1 week
+                        </button>
                         <button className="button button-secondary compact-button" onClick={() => startMoveBooking(booking)} type="button">
                           Move week
                         </button>
@@ -3314,83 +3867,94 @@ function App() {
                         </label>
                       </div>
                       <div className="booking-modal-actions">
-                        <button className="button button-primary" onClick={saveMovedBooking} type="button">
+                        <button className="button button-primary" onClick={saveMovedBooking} type="button" disabled={Boolean(moveBookingConflictNotice)}>
                           Save moved week
                         </button>
                         <button className="button button-secondary" onClick={cancelMoveBooking} type="button">
                           Clear move target
                         </button>
                       </div>
+                      {moveBookingConflictNotice ? <p className="inline-warning">{moveBookingConflictNotice}</p> : null}
                     </section>
                   ) : null}
 
-                  <div className="form-grid two-up">
-                    <SelectField
-                      label="Client"
-                      value={bookingClientId}
-                      options={clientOptionValues}
-                      onChange={setBookingClientId}
-                    />
-                    <label className="field">
-                      <span>Session date and time</span>
-                      <input
-                        className="field-input"
-                        type="datetime-local"
-                        value={bookingStartAtInput}
-                        onChange={(event) => setBookingStartAtInput(event.target.value)}
-                      />
-                    </label>
-                    <Field label="Session title" value={bookingTitle} onChange={setBookingTitle} />
-                    <label className="field">
-                      <span>Duration (minutes)</span>
-                      <input
-                        className="field-input"
-                        type="number"
-                        min={15}
-                        max={240}
-                        step={5}
-                        value={bookingDurationMinutes}
-                        onChange={(event) => setBookingDurationMinutes(event.target.value)}
-                      />
-                    </label>
-                  </div>
-
-                  <div className="form-grid two-up">
-                    <label className="toggle-row">
-                      <input
-                        checked={isRecurringBooking}
-                        onChange={(event) => setIsRecurringBooking(event.target.checked)}
-                        type="checkbox"
-                      />
-                      <span>Repeat weekly</span>
-                    </label>
-                    {isRecurringBooking ? (
-                      <label className="field">
-                        <span>How many weeks</span>
-                        <input
-                          className="field-input"
-                          type="number"
-                          min={2}
-                          max={52}
-                          value={recurringWeeks}
-                          onChange={(event) => setRecurringWeeks(event.target.value)}
+                  {!moveBookingTarget ? (
+                    <>
+                      <div className="form-grid two-up">
+                        <SelectField
+                          label="Client"
+                          value={bookingClientId}
+                          options={clientOptionValues}
+                          onChange={setBookingClientId}
                         />
-                      </label>
-                    ) : (
-                      <div />
-                    )}
-                  </div>
+                        <label className="field">
+                          <span>Session date and time</span>
+                          <input
+                            className="field-input"
+                            type="datetime-local"
+                            value={bookingStartAtInput}
+                            onChange={(event) => setBookingStartAtInput(event.target.value)}
+                          />
+                        </label>
+                        <Field label="Session title" value={bookingTitle} onChange={setBookingTitle} />
+                        <label className="field">
+                          <span>Duration (minutes)</span>
+                          <input
+                            className="field-input"
+                            type="number"
+                            min={15}
+                            max={240}
+                            step={5}
+                            value={bookingDurationMinutes}
+                            onChange={(event) => setBookingDurationMinutes(event.target.value)}
+                          />
+                        </label>
+                      </div>
 
-                  <Field label="Booking notes" value={bookingNotes} onChange={setBookingNotes} textarea />
+                      <div className="form-grid two-up">
+                        <label className="toggle-row">
+                          <input
+                            checked={isRecurringBooking}
+                            onChange={(event) => setIsRecurringBooking(event.target.checked)}
+                            type="checkbox"
+                          />
+                          <span>Repeat weekly</span>
+                        </label>
+                        {isRecurringBooking ? (
+                          <label className="field">
+                            <span>How many weeks</span>
+                            <input
+                              className="field-input"
+                              type="number"
+                              min={2}
+                              max={52}
+                              value={recurringWeeks}
+                              onChange={(event) => setRecurringWeeks(event.target.value)}
+                            />
+                          </label>
+                        ) : (
+                          <div />
+                        )}
+                      </div>
 
-                  <div className="booking-modal-actions">
-                    <button className="button button-primary" onClick={addBooking} type="button" disabled={!clientOptionValues.length}>
-                      {isRecurringBooking ? 'Add recurring booking' : 'Add booking'}
-                    </button>
-                    <button className="button button-secondary" onClick={closeBookingModal} type="button">
-                      Cancel
-                    </button>
-                  </div>
+                      <Field label="Booking notes" value={bookingNotes} onChange={setBookingNotes} textarea />
+
+                      <div className="booking-modal-actions">
+                        <button
+                          className="button button-primary"
+                          onClick={addBooking}
+                          type="button"
+                          disabled={!clientOptionValues.length || !bookingClientId || Boolean(bookingConflictNotice)}
+                        >
+                          {isRecurringBooking ? 'Add recurring booking' : 'Add booking'}
+                        </button>
+                        <button className="button button-secondary" onClick={closeBookingModal} type="button">
+                          Cancel
+                        </button>
+                      </div>
+                      {bookingConflictNotice ? <p className="inline-warning">{bookingConflictNotice}</p> : null}
+                    </>
+                  ) : null}
                 </section>
               </div>
             ) : null}
@@ -3425,6 +3989,53 @@ function App() {
                 />
                 <span>Show archived clients</span>
               </label>
+
+              <div className="filter-summary-row">
+                <p className="section-copy">Showing {filteredClients.length} of {visibleClientCount} clients</p>
+                <button
+                  className="button button-secondary compact-button"
+                  onClick={clearClientFilters}
+                  disabled={!hasClientFilters}
+                  type="button"
+                >
+                  Clear filters
+                </button>
+              </div>
+
+              <section className="tools-attention-block clients-due-card">
+                <div className="section-heading compact">
+                  <div>
+                    <span className="eyebrow">Client workflow</span>
+                    <h3>Due check-ins</h3>
+                  </div>
+                  <span className="pill">{dueCheckInClients.length} due</span>
+                </div>
+
+                <div className="record-list">
+                  {dueCheckInClients.length ? (
+                    dueCheckInClients.slice(0, 6).map((client) => (
+                      <article className="record-row" key={`due-client-${client.id}`}>
+                        <div>
+                          <strong>{client.name}</strong>
+                          <p>{client.goal || 'No goal added'}</p>
+                        </div>
+                        <div className="session-set-actions">
+                          <span className="pill">Due</span>
+                          <button
+                            className="button button-secondary compact-button"
+                            onClick={() => openClientCheckIn(client)}
+                            type="button"
+                          >
+                            Log check-in now
+                          </button>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="empty-copy">No client check-ins due right now.</p>
+                  )}
+                </div>
+              </section>
 
               <div className="item-list">
                 {filteredClients.map((client) => (
@@ -3548,9 +4159,14 @@ function App() {
                   <Field label="Notes" value={clientDraft.notes} onChange={(value) => setClientDraft({ ...clientDraft, notes: value })} textarea />
 
                   <div className="actions-row">
-                    <button className="button button-primary" onClick={saveClient} type="button">
+                    <button className="button button-primary" onClick={() => saveClient()} type="button">
                       Save client
                     </button>
+                    {!clientDraft.id ? (
+                      <button className="button button-secondary" onClick={() => saveClient(true)} type="button">
+                        Save and add another
+                      </button>
+                    ) : null}
                     {clientDraft.id ? (
                       <button
                         className="button button-danger"
@@ -3608,6 +4224,18 @@ function App() {
                 />
                 <span>Show archived programs</span>
               </label>
+
+              <div className="filter-summary-row">
+                <p className="section-copy">Showing {filteredPrograms.length} of {visibleProgramCount} programs</p>
+                <button
+                  className="button button-secondary compact-button"
+                  onClick={clearProgramFilters}
+                  disabled={!hasProgramFilters}
+                  type="button"
+                >
+                  Clear filters
+                </button>
+              </div>
 
               <div className="item-list">
                 {filteredPrograms.map((program) => {
@@ -3794,15 +4422,22 @@ function App() {
                 <SelectField
                   label="Program"
                   value={sessionProgramId}
-                  options={programs
-                    .filter((program) => !program.archived)
-                    .filter((program) => program.clientId === sessionClientId || !sessionClientId)
-                    .map((program) => ({ value: program.id, label: program.title }))}
+                  options={sessionProgramOptions}
                   onChange={(value) => setSessionProgramId(value)}
                 />
-                <button className="button button-primary" onClick={startSession} type="button">
-                  Start session
-                </button>
+                <div className="actions-row">
+                  <button
+                    className="button button-secondary"
+                    onClick={pickRecentProgramForSessionClient}
+                    disabled={!sessionClientId || !hasSessionProgramsForClient}
+                    type="button"
+                  >
+                    Use recent program
+                  </button>
+                  <button className="button button-primary" onClick={startSession} type="button">
+                    Start session
+                  </button>
+                </div>
               </div>
 
               <div className="record-list">
@@ -3981,6 +4616,18 @@ function App() {
                 placeholder="Search exercises by name, category, equipment..."
               />
 
+              <div className="filter-summary-row">
+                <p className="section-copy">Showing {filteredExercises.length} of {exercises.length} exercises</p>
+                <button
+                  className="button button-secondary compact-button"
+                  onClick={clearExerciseFilters}
+                  disabled={!hasExerciseFilters}
+                  type="button"
+                >
+                  Clear search
+                </button>
+              </div>
+
               <div className="item-list">
                 {filteredExercises.map((exercise) => (
                   <button
@@ -4043,9 +4690,14 @@ function App() {
                   <Field label="Exercise notes" value={exerciseDraft.notes} onChange={(value) => setExerciseDraft({ ...exerciseDraft, notes: value })} textarea />
 
                   <div className="actions-row">
-                    <button className="button button-primary" onClick={saveExercise} type="button">
+                    <button className="button button-primary" onClick={() => saveExercise()} type="button">
                       Save exercise
                     </button>
+                    {!exerciseDraft.id ? (
+                      <button className="button button-secondary" onClick={() => saveExercise(true)} type="button">
+                        Save and add another
+                      </button>
+                    ) : null}
                     {exerciseDraft.id ? (
                       <button className="button button-danger" onClick={() => deleteExercise(exerciseDraft.id)} type="button">
                         Delete exercise
