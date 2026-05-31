@@ -162,6 +162,8 @@ type RecentlyEditedItem = {
   editedAt: string;
 };
 
+type DueCheckInDismissals = Record<string, string>;
+
 const STORAGE_KEYS = {
   clients: 'superset.clients',
   exercises: 'superset.exercises',
@@ -169,7 +171,8 @@ const STORAGE_KEYS = {
   sessions: 'superset.sessions',
   bookings: 'superset.bookings',
   lockHash: 'superset.lock.hash',
-  recentlyEdited: 'superset.recently-edited'
+  recentlyEdited: 'superset.recently-edited',
+  dueCheckInDismissals: 'superset.due-checkin-dismissals'
 };
 
 const PROGRAM_TEMPLATES: Record<ProgramTemplateKey, {
@@ -1283,6 +1286,9 @@ function App() {
       )
       .slice(0, 8);
   });
+  const [dueCheckInDismissals, setDueCheckInDismissals] = useState<DueCheckInDismissals>(() =>
+    loadCollection<DueCheckInDismissals>(STORAGE_KEYS.dueCheckInDismissals, {})
+  );
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
 
   const [clientDraft, setClientDraft] = useState<Client>(blankClient());
@@ -1358,6 +1364,10 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.recentlyEdited, JSON.stringify(recentlyEdited));
   }, [recentlyEdited]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.dueCheckInDismissals, JSON.stringify(dueCheckInDismissals));
+  }, [dueCheckInDismissals]);
 
   useEffect(() => {
     const nextClientId = clients[0]?.id ?? '';
@@ -1637,21 +1647,38 @@ function App() {
 
   const liveCompletedSets = activeSession ? totalCompletedSets(activeSession.entries) : 0;
 
-  const dueCheckInClients = useMemo(() => {
+  const dueCheckInClientEntries = useMemo(() => {
     const now = Date.now();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 
     return clients
       .filter((client) => !client.archived)
-      .filter((client) => {
+      .flatMap((client) => {
         const latestCheckIn = client.checkIns.slice(-1)[0];
         if (!latestCheckIn) {
-          return true;
+          return [{ client, marker: 'none' }];
         }
 
-        return now - new Date(latestCheckIn.recordedAt).getTime() > sevenDaysMs;
+        if (now - new Date(latestCheckIn.recordedAt).getTime() <= sevenDaysMs) {
+          return [];
+        }
+
+        return [{ client, marker: latestCheckIn.recordedAt }];
       });
   }, [clients]);
+
+  const dueCheckInClients = useMemo(
+    () => dueCheckInClientEntries.map((entry) => entry.client),
+    [dueCheckInClientEntries]
+  );
+
+  const dueCheckInCount = useMemo(
+    () =>
+      dueCheckInClientEntries.filter(
+        (entry) => dueCheckInDismissals[entry.client.id] !== entry.marker
+      ).length,
+    [dueCheckInClientEntries, dueCheckInDismissals]
+  );
 
   const sessionTrendRows = useMemo(() => {
     const bucket = new Map<string, { label: string; completedSets: number; totalReps: number; totalLoadKg: number }>();
@@ -1689,7 +1716,6 @@ function App() {
     return max <= 0 ? 1 : max;
   }, [sessionTrendRows]);
 
-  const dueCheckInCount = dueCheckInClients.length;
   const hasUndoPending = undoSnapshots.length > 0;
 
   const pendingToolsCount = useMemo(() => {
@@ -2291,6 +2317,22 @@ function App() {
   function clearRecentlyEdited() {
     setRecentlyEdited([]);
     flash('Recent edits cleared.');
+  }
+
+  function markDueCheckInsReviewed() {
+    if (!dueCheckInClientEntries.length) {
+      flash('No due check-ins right now.');
+      return;
+    }
+
+    setDueCheckInDismissals((current) => {
+      const next = { ...current };
+      dueCheckInClientEntries.forEach((entry) => {
+        next[entry.client.id] = entry.marker;
+      });
+      return next;
+    });
+    flash('Due check-ins marked as reviewed.');
   }
 
   function attemptCloseClientModal() {
@@ -3151,12 +3193,24 @@ function App() {
                       <button
                         className="button button-secondary"
                         onClick={() => {
-                          setView('dashboard');
+                          setView('clients');
                           setIsMobileToolsOpen(false);
                         }}
                         type="button"
                       >
                         Review due check-ins
+                      </button>
+                    ) : null}
+                    {dueCheckInCount ? (
+                      <button
+                        className="button button-secondary"
+                        onClick={() => {
+                          markDueCheckInsReviewed();
+                          setIsMobileToolsOpen(false);
+                        }}
+                        type="button"
+                      >
+                        Mark reviewed
                       </button>
                     ) : null}
                     {hasUndoPending ? (
