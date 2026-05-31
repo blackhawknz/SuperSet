@@ -1470,6 +1470,19 @@ function App() {
   const hasProgramFilters = Boolean(programSearch.trim()) || showArchivedPrograms;
   const hasExerciseFilters = Boolean(exerciseSearch.trim());
 
+  const sessionProgramOptions = useMemo(
+    () =>
+      programs
+        .filter((program) => !program.archived)
+        .filter((program) => program.clientId === sessionClientId || !sessionClientId)
+        .map((program) => ({ value: program.id, label: program.title })),
+    [programs, sessionClientId]
+  );
+
+  const hasSessionProgramsForClient = programs.some(
+    (program) => program.clientId === sessionClientId && !program.archived
+  );
+
   const bookableClients = useMemo(
     () => clients.filter((client) => !client.archived),
     [clients]
@@ -2540,6 +2553,43 @@ function App() {
     });
     setSessionEditHistory([]);
     flash('Session ready.');
+  }
+
+  function pickRecentProgramForSessionClient() {
+    if (!sessionClientId) {
+      flash('Pick a client first.');
+      return;
+    }
+
+    const activeProgramsForClient = programs.filter(
+      (program) => program.clientId === sessionClientId && !program.archived
+    );
+    if (!activeProgramsForClient.length) {
+      flash('No active programs available for this client.');
+      return;
+    }
+
+    const activeProgramIds = new Set(activeProgramsForClient.map((program) => program.id));
+    const recentProgramId = sessionHistory.find(
+      (record) => record.clientId === sessionClientId && activeProgramIds.has(record.programId)
+    )?.programId;
+
+    const fallbackProgramId = activeProgramsForClient[0]?.id ?? '';
+    const targetProgramId = recentProgramId ?? fallbackProgramId;
+    const targetProgram = programs.find((program) => program.id === targetProgramId);
+
+    if (!targetProgram) {
+      flash('Unable to load a program for this client.');
+      return;
+    }
+
+    setSessionProgramId(targetProgram.id);
+    if (recentProgramId) {
+      flash(`Loaded recent program: ${targetProgram.title}.`);
+      return;
+    }
+
+    flash(`No recent session found. Loaded: ${targetProgram.title}.`);
   }
 
   function setPresetReps(entryId: string, setIndex: number, reps: string) {
@@ -3842,15 +3892,22 @@ function App() {
                 <SelectField
                   label="Program"
                   value={sessionProgramId}
-                  options={programs
-                    .filter((program) => !program.archived)
-                    .filter((program) => program.clientId === sessionClientId || !sessionClientId)
-                    .map((program) => ({ value: program.id, label: program.title }))}
+                  options={sessionProgramOptions}
                   onChange={(value) => setSessionProgramId(value)}
                 />
-                <button className="button button-primary" onClick={startSession} type="button">
-                  Start session
-                </button>
+                <div className="actions-row">
+                  <button
+                    className="button button-secondary"
+                    onClick={pickRecentProgramForSessionClient}
+                    disabled={!sessionClientId || !hasSessionProgramsForClient}
+                    type="button"
+                  >
+                    Use recent program
+                  </button>
+                  <button className="button button-primary" onClick={startSession} type="button">
+                    Start session
+                  </button>
+                </div>
               </div>
 
               <div className="record-list">
