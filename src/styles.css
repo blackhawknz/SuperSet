@@ -742,6 +742,11 @@ button {
   font-size: 0.9rem;
 }
 
+.booking-helper {
+  margin: -2px 0 10px;
+  font-size: 0.84rem;
+}
+
 .detail-strip {
   display: flex;
   flex-wrap: wrap;
