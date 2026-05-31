@@ -390,6 +390,17 @@ button {
   border-color: rgba(249, 115, 22, 0.35);
 }
 
+.recent-item-meta {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.recent-item-meta .muted-text {
+  margin: 0;
+  font-size: 0.76rem;
+}
+
 .item-row strong,
 .record-row strong,
 .exercise-block strong,

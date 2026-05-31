@@ -151,6 +151,15 @@ type UndoSnapshot = {
 };
 
 type ProgramTemplateKey = 'strength' | 'hypertrophy' | 'fat-loss';
+type RecentlyEditedEntityType = 'client' | 'program' | 'exercise';
+
+type RecentlyEditedItem = {
+  entityType: RecentlyEditedEntityType;
+  entityId: string;
+  label: string;
+  detail: string;
+  editedAt: string;
+};
 
 const STORAGE_KEYS = {
   clients: 'superset.clients',
@@ -158,7 +167,8 @@ const STORAGE_KEYS = {
   programs: 'superset.programs',
   sessions: 'superset.sessions',
   bookings: 'superset.bookings',
-  lockHash: 'superset.lock.hash'
+  lockHash: 'superset.lock.hash',
+  recentlyEdited: 'superset.recently-edited'
 };
 
 const PROGRAM_TEMPLATES: Record<ProgramTemplateKey, {
@@ -1259,6 +1269,19 @@ function App() {
     const stored = loadCollection<CalendarBooking[]>(STORAGE_KEYS.bookings, seedBookings);
     return stored.map((booking) => normalizeCalendarBooking(booking));
   });
+  const [recentlyEdited, setRecentlyEdited] = useState<RecentlyEditedItem[]>(() => {
+    const stored = loadCollection<RecentlyEditedItem[]>(STORAGE_KEYS.recentlyEdited, []);
+    return stored
+      .filter((item) =>
+        Boolean(
+          item &&
+          item.entityId &&
+          item.label &&
+          (item.entityType === 'client' || item.entityType === 'program' || item.entityType === 'exercise')
+        )
+      )
+      .slice(0, 8);
+  });
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
 
   const [clientDraft, setClientDraft] = useState<Client>(blankClient());
@@ -1329,6 +1352,10 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.bookings, JSON.stringify(bookings));
   }, [bookings]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.recentlyEdited, JSON.stringify(recentlyEdited));
+  }, [recentlyEdited]);
 
   useEffect(() => {
     const nextClientId = clients[0]?.id ?? '';
@@ -2275,6 +2302,70 @@ function App() {
     setIsExerciseModalOpen(false);
   }
 
+  function trackRecentlyEdited(item: Omit<RecentlyEditedItem, 'editedAt'>) {
+    const nextItem: RecentlyEditedItem = {
+      ...item,
+      editedAt: new Date().toISOString()
+    };
+
+    setRecentlyEdited((current) => {
+      const deduped = current.filter(
+        (entry) => !(entry.entityType === nextItem.entityType && entry.entityId === nextItem.entityId)
+      );
+      return [nextItem, ...deduped].slice(0, 8);
+    });
+  }
+
+  function openRecentlyEditedItem(item: RecentlyEditedItem) {
+    if (item.entityType === 'client') {
+      const client = clients.find((entry) => entry.id === item.entityId);
+      if (!client) {
+        setRecentlyEdited((current) =>
+          current.filter(
+            (entry) => !(entry.entityType === item.entityType && entry.entityId === item.entityId)
+          )
+        );
+        flash('Client no longer exists. Removed from recently edited.');
+        return;
+      }
+
+      setView('clients');
+      openClientEditor(client);
+      return;
+    }
+
+    if (item.entityType === 'program') {
+      const program = programs.find((entry) => entry.id === item.entityId);
+      if (!program) {
+        setRecentlyEdited((current) =>
+          current.filter(
+            (entry) => !(entry.entityType === item.entityType && entry.entityId === item.entityId)
+          )
+        );
+        flash('Program no longer exists. Removed from recently edited.');
+        return;
+      }
+
+      setView('programs');
+      openProgramEditor(program);
+      return;
+    }
+
+    const exercise = exercises.find((entry) => entry.id === item.entityId);
+    if (!exercise) {
+      setRecentlyEdited((current) =>
+        current.filter(
+          (entry) => !(entry.entityType === item.entityType && entry.entityId === item.entityId)
+        )
+      );
+      flash('Exercise no longer exists. Removed from recently edited.');
+      return;
+    }
+
+    setView('library');
+    openExerciseEditor(exercise);
+  }
+
   function saveClient(saveAndAddAnother = false) {
     if (!clientDraft.name.trim()) {
       flash('Add a client name first.');
@@ -2302,6 +2393,14 @@ function App() {
       ...recordBase,
       measurementHistory
     };
+
+    trackRecentlyEdited({
+      entityType: 'client',
+      entityId: record.id,
+      label: record.name,
+      detail: record.status || 'Client'
+    });
+
     setClients((current) => {
       const existingIndex = current.findIndex((client) => client.id === record.id);
       if (existingIndex >= 0) {
@@ -2407,6 +2506,14 @@ function App() {
     }
 
     const record = { ...exerciseDraft, id: exerciseDraft.id || createId('exercise') };
+
+    trackRecentlyEdited({
+      entityType: 'exercise',
+      entityId: record.id,
+      label: record.name,
+      detail: record.category || record.equipment || 'Exercise'
+    });
+
     setExercises((current) => {
       const existingIndex = current.findIndex((exercise) => exercise.id === record.id);
       if (existingIndex >= 0) {
@@ -2479,6 +2586,14 @@ function App() {
       exercises: programDraft.exercises.length ? programDraft.exercises : blankProgram(programDraft.clientId, exercises[0]?.id ?? '').exercises
     };
 
+    const recordClientName = clients.find((client) => client.id === record.clientId)?.name ?? 'Unassigned client';
+    trackRecentlyEdited({
+      entityType: 'program',
+      entityId: record.id,
+      label: record.title,
+      detail: recordClientName
+    });
+
     setPrograms((current) => {
       const existingIndex = current.findIndex((program) => program.id === record.id);
       if (existingIndex >= 0) {
@@ -2547,6 +2662,14 @@ function App() {
       archived: false,
       exercises: source.exercises.map((exercise) => ({ ...exercise, id: createId('prog-ex') }))
     };
+
+    const copyClientName = clients.find((client) => client.id === copy.clientId)?.name ?? 'Unassigned client';
+    trackRecentlyEdited({
+      entityType: 'program',
+      entityId: copy.id,
+      label: copy.title,
+      detail: copyClientName
+    });
 
     setPrograms((current) => [copy, ...current]);
     setSelectedProgramId(copy.id);
@@ -3198,6 +3321,39 @@ function App() {
                   ))
                 ) : (
                   <p className="empty-copy">No sessions saved yet. Your first run will appear here.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="panel card">
+              <div className="section-heading compact">
+                <div>
+                  <span className="eyebrow">Recent edits</span>
+                  <h2>Jump back in fast</h2>
+                </div>
+              </div>
+
+              <div className="record-list">
+                {recentlyEdited.length ? (
+                  recentlyEdited.map((item) => (
+                    <button
+                      className="item-row"
+                      key={`${item.entityType}-${item.entityId}`}
+                      onClick={() => openRecentlyEditedItem(item)}
+                      type="button"
+                    >
+                      <div>
+                        <strong>{item.label}</strong>
+                        <p>{item.detail}</p>
+                      </div>
+                      <div className="recent-item-meta">
+                        <span className="pill">{item.entityType}</span>
+                        <span className="muted-text">{formatDateTime(item.editedAt)}</span>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
                 )}
               </div>
             </section>
