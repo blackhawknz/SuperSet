@@ -1345,7 +1345,7 @@ function App() {
 
   useEffect(() => {
     const nextExerciseId = exercises[0]?.id ?? '';
-    if (!selectedExerciseId && nextExerciseId) {
+    if (!selectedExerciseId && nextExerciseId && !isExerciseModalOpen) {
       setSelectedExerciseId(nextExerciseId);
     }
     if (programDraft.exercises.length === 0 && nextExerciseId) {
@@ -1354,7 +1354,7 @@ function App() {
         exercises: [blankProgram(current.clientId || clients[0]?.id || '', nextExerciseId).exercises[0]]
       }));
     }
-  }, [clients, exercises, programDraft.exercises.length, selectedExerciseId]);
+  }, [clients, exercises, isExerciseModalOpen, programDraft.exercises.length, selectedExerciseId]);
 
   useEffect(() => {
     const nextProgramId =
@@ -1686,13 +1686,17 @@ function App() {
   }, [selectedClient, selectedClientId, isClientModalOpen]);
 
   useEffect(() => {
+    if (isExerciseModalOpen && !selectedExerciseId) {
+      // Creating a new exercise — don't replace the blank draft with fallback selection.
+      return;
+    }
     if (selectedExercise && selectedExerciseId !== selectedExercise.id) {
       setSelectedExerciseId(selectedExercise.id);
     }
     if (selectedExercise) {
       setExerciseDraft(selectedExercise);
     }
-  }, [selectedExercise, selectedExerciseId]);
+  }, [isExerciseModalOpen, selectedExercise, selectedExerciseId]);
 
   useEffect(() => {
     if (selectedProgram && selectedProgramId !== selectedProgram.id) {
@@ -2243,7 +2247,7 @@ function App() {
     setIsExerciseModalOpen(false);
   }
 
-  function saveClient() {
+  function saveClient(saveAndAddAnother = false) {
     if (!clientDraft.name.trim()) {
       flash('Add a client name first.');
       return;
@@ -2279,6 +2283,13 @@ function App() {
       }
       return [record, ...current];
     });
+
+    if (saveAndAddAnother) {
+      openNewClientModal();
+      flash('Client saved. Ready to add another.');
+      return;
+    }
+
     setClientDraft(record);
     setSelectedClientId(record.id);
     setIsClientModalOpen(false);
@@ -2361,7 +2372,7 @@ function App() {
     setIsClientModalOpen(true);
   }
 
-  function saveExercise() {
+  function saveExercise(saveAndAddAnother = false) {
     if (!exerciseDraft.name.trim()) {
       flash('Add an exercise name first.');
       return;
@@ -2377,6 +2388,13 @@ function App() {
       }
       return [record, ...current];
     });
+
+    if (saveAndAddAnother) {
+      openNewExerciseModal();
+      flash('Exercise saved. Ready to add another.');
+      return;
+    }
+
     setExerciseDraft(record);
     setSelectedExerciseId(record.id);
     setIsExerciseModalOpen(false);
@@ -3634,9 +3652,14 @@ function App() {
                   <Field label="Notes" value={clientDraft.notes} onChange={(value) => setClientDraft({ ...clientDraft, notes: value })} textarea />
 
                   <div className="actions-row">
-                    <button className="button button-primary" onClick={saveClient} type="button">
+                    <button className="button button-primary" onClick={() => saveClient()} type="button">
                       Save client
                     </button>
+                    {!clientDraft.id ? (
+                      <button className="button button-secondary" onClick={() => saveClient(true)} type="button">
+                        Save and add another
+                      </button>
+                    ) : null}
                     {clientDraft.id ? (
                       <button
                         className="button button-danger"
@@ -4160,9 +4183,14 @@ function App() {
                   <Field label="Exercise notes" value={exerciseDraft.notes} onChange={(value) => setExerciseDraft({ ...exerciseDraft, notes: value })} textarea />
 
                   <div className="actions-row">
-                    <button className="button button-primary" onClick={saveExercise} type="button">
+                    <button className="button button-primary" onClick={() => saveExercise()} type="button">
                       Save exercise
                     </button>
+                    {!exerciseDraft.id ? (
+                      <button className="button button-secondary" onClick={() => saveExercise(true)} type="button">
+                        Save and add another
+                      </button>
+                    ) : null}
                     {exerciseDraft.id ? (
                       <button className="button button-danger" onClick={() => deleteExercise(exerciseDraft.id)} type="button">
                         Delete exercise
