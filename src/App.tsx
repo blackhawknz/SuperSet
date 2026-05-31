@@ -1673,15 +1673,23 @@ function App() {
 
     const startAt = startDate.toISOString();
     const totalOccurrences = isRecurringBooking ? Math.max(2, Math.floor(recurrenceCount)) : 1;
-    const hasConflict = Array.from({ length: totalOccurrences }, (_, index) => {
+    const firstConflict = Array.from({ length: totalOccurrences }, (_, index) => {
       const occurrenceStart = addDaysToIsoDate(startAt, index * 7);
       return {
         startAt: occurrenceStart,
         endAt: addMinutesToIsoDate(occurrenceStart, duration)
       };
-    }).some((candidate) => hasPlannedBookingOverlap(candidate.startAt, candidate.endAt));
+    }).find((candidate) => hasPlannedBookingOverlap(candidate.startAt, candidate.endAt));
 
-    return hasConflict ? 'Selected time overlaps an existing planned session.' : '';
+    if (!firstConflict) {
+      return '';
+    }
+
+    if (isRecurringBooking) {
+      return `Recurring booking conflicts with an existing planned session on ${formatDateTime(firstConflict.startAt)}.`;
+    }
+
+    return 'Selected time overlaps an existing planned session.';
   }, [
     bookingClientId,
     bookingDurationMinutes,
@@ -1690,6 +1698,20 @@ function App() {
     recurringWeeks,
     bookings
   ]);
+
+  const recurringBookingSummary = useMemo(() => {
+    if (!isRecurringBooking) {
+      return '';
+    }
+
+    const recurrenceCount = Number(recurringWeeks);
+    if (!Number.isFinite(recurrenceCount) || recurrenceCount < 2 || recurrenceCount > 52) {
+      return 'Choose 2 to 52 weeks for recurring bookings.';
+    }
+
+    const totalOccurrences = Math.max(2, Math.floor(recurrenceCount));
+    return `Will create ${totalOccurrences} weekly bookings.`;
+  }, [isRecurringBooking, recurringWeeks]);
 
   const moveBookingConflictNotice = useMemo(() => {
     if (!moveBookingId) {
@@ -3965,6 +3987,7 @@ function App() {
                           Cancel
                         </button>
                       </div>
+                      {recurringBookingSummary && !bookingConflictNotice ? <p className="booking-helper muted-text">{recurringBookingSummary}</p> : null}
                       {bookingConflictNotice ? <p className="inline-warning">{bookingConflictNotice}</p> : null}
                     </>
                   ) : null}
