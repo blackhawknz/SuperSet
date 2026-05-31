@@ -104,6 +104,20 @@ button {
   line-height: 0.95;
 }
 
+.hero-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.moment-quote {
+  color: #94a3b8;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
 .hero-copy,
 .section-copy,
 .muted-text,
