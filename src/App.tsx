@@ -199,7 +199,10 @@ const STORAGE_KEYS = {
   activeSessionDraft: 'superset.active-session-draft',
   lockHash: 'superset.lock.hash',
   recentlyEdited: 'superset.recently-edited',
-  dueCheckInDismissals: 'superset.due-checkin-dismissals'
+  dueCheckInDismissals: 'superset.due-checkin-dismissals',
+  dashboardExpanded: 'superset.ui.dashboard-expanded',
+  clientsExpanded: 'superset.ui.clients-expanded',
+  programsExpanded: 'superset.ui.programs-expanded'
 };
 
 const MOMENT_QUOTES = [
@@ -887,6 +890,19 @@ function loadCollection<T>(key: string, fallback: T): T {
   }
 }
 
+function loadBooleanSetting(key: string, fallback = false) {
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+
+  const storedValue = window.localStorage.getItem(key);
+  if (storedValue == null) {
+    return fallback;
+  }
+
+  return storedValue === 'true';
+}
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString([], {
     dateStyle: 'medium',
@@ -1486,9 +1502,9 @@ function App() {
   const [isDataDrawerOpen, setIsDataDrawerOpen] = useState(false);
   const [isSecurityDrawerOpen, setIsSecurityDrawerOpen] = useState(false);
   const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
-  const [isDashboardExpanded, setIsDashboardExpanded] = useState(false);
-  const [isClientsExpanded, setIsClientsExpanded] = useState(false);
-  const [isProgramsExpanded, setIsProgramsExpanded] = useState(false);
+  const [isDashboardExpanded, setIsDashboardExpanded] = useState(() => loadBooleanSetting(STORAGE_KEYS.dashboardExpanded, false));
+  const [isClientsExpanded, setIsClientsExpanded] = useState(() => loadBooleanSetting(STORAGE_KEYS.clientsExpanded, false));
+  const [isProgramsExpanded, setIsProgramsExpanded] = useState(() => loadBooleanSetting(STORAGE_KEYS.programsExpanded, false));
   const [exportClientId, setExportClientId] = useState('all');
   const [exportStartDate, setExportStartDate] = useState('');
   const [exportEndDate, setExportEndDate] = useState('');
@@ -1538,6 +1554,18 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.dueCheckInDismissals, JSON.stringify(dueCheckInDismissals));
   }, [dueCheckInDismissals]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.dashboardExpanded, String(isDashboardExpanded));
+  }, [isDashboardExpanded]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.clientsExpanded, String(isClientsExpanded));
+  }, [isClientsExpanded]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.programsExpanded, String(isProgramsExpanded));
+  }, [isProgramsExpanded]);
 
   useEffect(() => {
     const nextClientId = clients[0]?.id ?? '';
