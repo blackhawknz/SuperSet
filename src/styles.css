@@ -747,6 +747,19 @@ button {
   font-size: 0.84rem;
 }
 
+.booking-suggestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.booking-suggestion-row .muted-text {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
 .detail-strip {
   display: flex;
   flex-wrap: wrap;

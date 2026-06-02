@@ -1713,6 +1713,59 @@ function App() {
     return `Will create ${totalOccurrences} weekly bookings.`;
   }, [isRecurringBooking, recurringWeeks]);
 
+  const bookingConflictSuggestions = useMemo(() => {
+    if (!bookingConflictNotice) {
+      return [] as string[];
+    }
+
+    const startDate = new Date(bookingStartAtInput);
+    if (Number.isNaN(startDate.getTime())) {
+      return [] as string[];
+    }
+
+    const duration = Number(bookingDurationMinutes);
+    if (!Number.isFinite(duration) || duration < 15 || duration > 240) {
+      return [] as string[];
+    }
+
+    const recurrenceCount = Number(recurringWeeks);
+    if (isRecurringBooking && (!Number.isFinite(recurrenceCount) || recurrenceCount < 2 || recurrenceCount > 52)) {
+      return [] as string[];
+    }
+
+    const totalOccurrences = isRecurringBooking ? Math.max(2, Math.floor(recurrenceCount)) : 1;
+    const suggestions: string[] = [];
+    let cursor = addMinutesToIsoDate(startDate.toISOString(), 15);
+
+    // Search forward in 15-minute increments and suggest the first few valid slots.
+    for (let step = 0; step < 320 && suggestions.length < 4; step += 1) {
+      const hasSeriesConflict = Array.from({ length: totalOccurrences }, (_, index) => {
+        const occurrenceStart = addDaysToIsoDate(cursor, index * 7);
+        return {
+          startAt: occurrenceStart,
+          endAt: addMinutesToIsoDate(occurrenceStart, duration)
+        };
+      }).some((candidate) => hasPlannedBookingOverlap(candidate.startAt, candidate.endAt));
+
+      if (!hasSeriesConflict) {
+        suggestions.push(cursor);
+        cursor = addMinutesToIsoDate(cursor, 30);
+        continue;
+      }
+
+      cursor = addMinutesToIsoDate(cursor, 15);
+    }
+
+    return suggestions;
+  }, [
+    bookingConflictNotice,
+    bookingDurationMinutes,
+    bookingStartAtInput,
+    isRecurringBooking,
+    recurringWeeks,
+    bookings
+  ]);
+
   const moveBookingConflictNotice = useMemo(() => {
     if (!moveBookingId) {
       return '';
@@ -3989,6 +4042,21 @@ function App() {
                       </div>
                       {recurringBookingSummary && !bookingConflictNotice ? <p className="booking-helper muted-text">{recurringBookingSummary}</p> : null}
                       {bookingConflictNotice ? <p className="inline-warning">{bookingConflictNotice}</p> : null}
+                      {bookingConflictSuggestions.length ? (
+                        <div className="booking-suggestion-row">
+                          <span className="muted-text">Try next free slot:</span>
+                          {bookingConflictSuggestions.map((isoValue) => (
+                            <button
+                              key={isoValue}
+                              className="button button-secondary compact-button"
+                              onClick={() => setBookingStartAtInput(toDateTimeLocalValue(isoValue))}
+                              type="button"
+                            >
+                              {formatDateTime(isoValue)}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </>
                   ) : null}
                 </section>
