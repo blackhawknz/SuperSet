@@ -162,6 +162,32 @@ type RecentlyEditedItem = {
   editedAt: string;
 };
 
+type ClientTimelineEvent = {
+  id: string;
+  kind: 'session' | 'booking' | 'measurement' | 'check-in';
+  kindLabel: string;
+  occurredAt: string;
+  title: string;
+  detail: string;
+};
+
+type CommandPaletteItem = {
+  id: string;
+  type: 'action' | 'client' | 'program' | 'exercise' | 'booking';
+  label: string;
+  detail: string;
+  keywords: string;
+  execute: () => void;
+};
+
+type UndoWindow = {
+  id: string;
+  label: string;
+  kind: 'snapshot' | 'bookings';
+  expiresAt: number;
+  bookingsSnapshot?: CalendarBooking[];
+};
+
 type DueCheckInDismissals = Record<string, string>;
 
 const STORAGE_KEYS = {
@@ -170,6 +196,7 @@ const STORAGE_KEYS = {
   programs: 'superset.programs',
   sessions: 'superset.sessions',
   bookings: 'superset.bookings',
+  activeSessionDraft: 'superset.active-session-draft',
   lockHash: 'superset.lock.hash',
   recentlyEdited: 'superset.recently-edited',
   dueCheckInDismissals: 'superset.due-checkin-dismissals'
@@ -880,6 +907,10 @@ function formatTimeOnly(value: string) {
   });
 }
 
+function formatProgramCopyDateTag(value: Date) {
+  return value.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
 function formatLocalDateKey(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -910,6 +941,57 @@ function normalizeSessionRecord(record: Partial<SessionRecord>): SessionRecord {
     completedSets: record.completedSets ?? 0,
     totalReps: record.totalReps ?? 0,
     totalLoadKg: record.totalLoadKg ?? 0
+  };
+}
+
+function normalizeSessionSet(setState: Partial<SessionSet>): SessionSet {
+  return {
+    completed: Boolean(setState.completed),
+    reps: setState.reps ?? '',
+    weight: setState.weight ?? ''
+  };
+}
+
+function normalizeSessionEntry(entry: Partial<SessionEntry>): SessionEntry {
+  const initialSetStates = Array.isArray(entry.setStates)
+    ? entry.setStates.map((setState) => normalizeSessionSet(setState))
+    : [];
+  const parsedTargetSets = Number(entry.targetSets ?? initialSetStates.length ?? 1);
+  const targetSets = Number.isFinite(parsedTargetSets) && parsedTargetSets > 0
+    ? Math.floor(parsedTargetSets)
+    : Math.max(1, initialSetStates.length);
+
+  const setStates = initialSetStates.length
+    ? initialSetStates
+    : Array.from({ length: targetSets }, () => ({ completed: false, reps: entry.targetReps ?? '', weight: '' }));
+
+  return {
+    id: entry.id ?? createId('session-entry'),
+    exerciseId: entry.exerciseId ?? '',
+    exerciseName: entry.exerciseName ?? 'Exercise',
+    targetSets,
+    targetReps: entry.targetReps ?? '',
+    rest: entry.rest ?? '',
+    notes: entry.notes ?? '',
+    setStates
+  };
+}
+
+function normalizeActiveSession(session: Partial<ActiveSession> | null | undefined): ActiveSession | null {
+  if (!session || !session.clientId || !session.programId) {
+    return null;
+  }
+
+  return {
+    clientId: session.clientId,
+    clientName: session.clientName ?? '',
+    programId: session.programId,
+    programName: session.programName ?? '',
+    startedAt: session.startedAt ?? new Date().toISOString(),
+    notes: session.notes ?? '',
+    entries: Array.isArray(session.entries)
+      ? session.entries.map((entry) => normalizeSessionEntry(entry))
+      : []
   };
 }
 
@@ -1035,6 +1117,33 @@ function formatTimer(seconds: number) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+function isIsoWithinDateRange(isoValue: string, startDateInput?: string, endDateInput?: string) {
+  const valueMs = new Date(isoValue).getTime();
+  if (Number.isNaN(valueMs)) {
+    return false;
+  }
+
+  if (startDateInput) {
+    const startMs = new Date(`${startDateInput}T00:00:00`).getTime();
+    if (!Number.isNaN(startMs) && valueMs < startMs) {
+      return false;
+    }
+  }
+
+  if (endDateInput) {
+    const endMs = new Date(`${endDateInput}T23:59:59.999`).getTime();
+    if (!Number.isNaN(endMs) && valueMs > endMs) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function toFileLabel(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'all';
+}
+
 function blankCheckIn(): CheckInRecord {
   return {
     id: createId('ci'),
@@ -1092,7 +1201,7 @@ function buildClientUpdateText(client: Client, program: Program, exercises: Exer
   ].join('\n');
 }
 
-function buildClientProgressCsv(clients: Client[]) {
+function buildClientProgressCsv(clients: Client[], startDateInput = '', endDateInput = '') {
   const rows: string[] = [];
   rows.push([
     'clientName',
@@ -1110,7 +1219,9 @@ function buildClientProgressCsv(clients: Client[]) {
   ].join(','));
 
   clients.forEach((client) => {
-    client.measurementHistory.forEach((snapshot) => {
+    client.measurementHistory
+      .filter((snapshot) => isIsoWithinDateRange(snapshot.recordedAt, startDateInput, endDateInput))
+      .forEach((snapshot) => {
       rows.push([
         csvEscape(client.name),
         'measurement',
@@ -1127,7 +1238,9 @@ function buildClientProgressCsv(clients: Client[]) {
       ].join(','));
     });
 
-    client.checkIns.forEach((checkIn) => {
+    client.checkIns
+      .filter((checkIn) => isIsoWithinDateRange(checkIn.recordedAt, startDateInput, endDateInput))
+      .forEach((checkIn) => {
       rows.push([
         csvEscape(client.name),
         'check-in',
@@ -1316,7 +1429,12 @@ function App() {
   const [dueCheckInDismissals, setDueCheckInDismissals] = useState<DueCheckInDismissals>(() =>
     loadCollection<DueCheckInDismissals>(STORAGE_KEYS.dueCheckInDismissals, {})
   );
-  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [activeSession, setActiveSession] = useState<ActiveSession | null>(() =>
+    normalizeActiveSession(loadCollection<Partial<ActiveSession> | null>(STORAGE_KEYS.activeSessionDraft, null))
+  );
+  const [showRecoveredSessionNotice, setShowRecoveredSessionNotice] = useState(() =>
+    Boolean(normalizeActiveSession(loadCollection<Partial<ActiveSession> | null>(STORAGE_KEYS.activeSessionDraft, null)))
+  );
 
   const [clientDraft, setClientDraft] = useState<Client>(blankClient());
   const [exerciseDraft, setExerciseDraft] = useState<Exercise>(blankExercise());
@@ -1337,6 +1455,7 @@ function App() {
   const [moveBookingStartAtInput, setMoveBookingStartAtInput] = useState('');
   const [moveBookingDurationMinutes, setMoveBookingDurationMinutes] = useState('60');
   const [selectedClientId, setSelectedClientId] = useState(seedClients[0]?.id ?? '');
+  const [timelineClientId, setTimelineClientId] = useState(seedClients[0]?.id ?? '');
   const [selectedExerciseId, setSelectedExerciseId] = useState(seedExercises[0]?.id ?? '');
   const [selectedProgramId, setSelectedProgramId] = useState(seedPrograms[0]?.id ?? '');
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
@@ -1367,11 +1486,18 @@ function App() {
   const [isDataDrawerOpen, setIsDataDrawerOpen] = useState(false);
   const [isSecurityDrawerOpen, setIsSecurityDrawerOpen] = useState(false);
   const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
+  const [exportClientId, setExportClientId] = useState('all');
+  const [exportStartDate, setExportStartDate] = useState('');
+  const [exportEndDate, setExportEndDate] = useState('');
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState('');
+  const [undoWindow, setUndoWindow] = useState<UndoWindow | null>(null);
   const [notice, setNotice] = useState('');
   const [momentQuote] = useState(
     () => MOMENT_QUOTES[Math.floor(Math.random() * MOMENT_QUOTES.length)]
   );
   const importInputRef = useRef<HTMLInputElement>(null);
+  const commandPaletteInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.clients, JSON.stringify(clients));
@@ -1388,6 +1514,15 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(sessionHistory));
   }, [sessionHistory]);
+
+  useEffect(() => {
+    if (activeSession) {
+      window.localStorage.setItem(STORAGE_KEYS.activeSessionDraft, JSON.stringify(activeSession));
+      return;
+    }
+
+    window.localStorage.removeItem(STORAGE_KEYS.activeSessionDraft);
+  }, [activeSession]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.bookings, JSON.stringify(bookings));
@@ -1562,6 +1697,61 @@ function App() {
     (program) => program.clientId === sessionClientId && !program.archived
   );
 
+  const timelineClient = useMemo(
+    () => clients.find((client) => client.id === timelineClientId) ?? null,
+    [clients, timelineClientId]
+  );
+
+  const clientTimelineEvents = useMemo(() => {
+    if (!timelineClient) {
+      return [] as ClientTimelineEvent[];
+    }
+
+    const measurementEvents: ClientTimelineEvent[] = timelineClient.measurementHistory.map((snapshot) => ({
+      id: `measurement-${snapshot.id}`,
+      kind: 'measurement',
+      kindLabel: 'Measurement',
+      occurredAt: snapshot.recordedAt,
+      title: 'Body stats updated',
+      detail: `Weight ${snapshot.measurements.bodyWeightKg || '-'} kg · Body fat ${snapshot.measurements.bodyFatPercent || '-'}% · Waist ${snapshot.measurements.waistCm || '-'} cm`
+    }));
+
+    const checkInEvents: ClientTimelineEvent[] = timelineClient.checkIns.map((checkIn) => ({
+      id: `checkin-${checkIn.id}`,
+      kind: 'check-in',
+      kindLabel: 'Check-in',
+      occurredAt: checkIn.recordedAt,
+      title: 'Wellness check-in logged',
+      detail: `Sleep ${checkIn.sleepHours || '-'} h · Stress ${checkIn.stress || '-'} · Energy ${checkIn.energy || '-'} · Steps ${checkIn.steps || '-'}`
+    }));
+
+    const bookingEvents: ClientTimelineEvent[] = bookings
+      .filter((booking) => booking.clientId === timelineClient.id)
+      .map((booking) => ({
+        id: `booking-${booking.id}`,
+        kind: 'booking',
+        kindLabel: 'Booking',
+        occurredAt: booking.startAt,
+        title: `${booking.title} (${booking.status})`,
+        detail: `${formatDateTime(booking.startAt)} - ${formatTimeOnly(booking.endAt)}${booking.recurrence === 'weekly' ? ' · Weekly' : ''}`
+      }));
+
+    const sessionEvents: ClientTimelineEvent[] = sessionHistory
+      .filter((record) => record.clientId === timelineClient.id)
+      .map((record) => ({
+        id: `session-${record.id}`,
+        kind: 'session',
+        kindLabel: 'Session',
+        occurredAt: record.finishedAt,
+        title: `${record.programName} saved`,
+        detail: `${record.completedSets} sets · ${record.totalReps} reps · ${Math.round(record.totalLoadKg)} kg load`
+      }));
+
+    return [...sessionEvents, ...bookingEvents, ...measurementEvents, ...checkInEvents]
+      .filter((event) => !Number.isNaN(new Date(event.occurredAt).getTime()))
+      .sort((left, right) => (left.occurredAt > right.occurredAt ? -1 : 1));
+  }, [bookings, sessionHistory, timelineClient]);
+
   const bookableClients = useMemo(
     () => clients.filter((client) => !client.archived),
     [clients]
@@ -1570,6 +1760,14 @@ function App() {
   const clientOptionValues = useMemo(
     () => bookableClients.map((client) => ({ value: client.id, label: client.name })),
     [bookableClients]
+  );
+
+  const exportClientOptions = useMemo(
+    () => [
+      { value: 'all', label: 'All clients' },
+      ...clients.map((client) => ({ value: client.id, label: client.name }))
+    ],
+    [clients]
   );
 
   const upcomingBookings = useMemo(() => {
@@ -1712,6 +1910,59 @@ function App() {
     const totalOccurrences = Math.max(2, Math.floor(recurrenceCount));
     return `Will create ${totalOccurrences} weekly bookings.`;
   }, [isRecurringBooking, recurringWeeks]);
+
+  const bookingConflictSuggestions = useMemo(() => {
+    if (!bookingConflictNotice) {
+      return [] as string[];
+    }
+
+    const startDate = new Date(bookingStartAtInput);
+    if (Number.isNaN(startDate.getTime())) {
+      return [] as string[];
+    }
+
+    const duration = Number(bookingDurationMinutes);
+    if (!Number.isFinite(duration) || duration < 15 || duration > 240) {
+      return [] as string[];
+    }
+
+    const recurrenceCount = Number(recurringWeeks);
+    if (isRecurringBooking && (!Number.isFinite(recurrenceCount) || recurrenceCount < 2 || recurrenceCount > 52)) {
+      return [] as string[];
+    }
+
+    const totalOccurrences = isRecurringBooking ? Math.max(2, Math.floor(recurrenceCount)) : 1;
+    const suggestions: string[] = [];
+    let cursor = addMinutesToIsoDate(startDate.toISOString(), 15);
+
+    // Search forward in 15-minute increments and suggest the first few valid slots.
+    for (let step = 0; step < 320 && suggestions.length < 4; step += 1) {
+      const hasSeriesConflict = Array.from({ length: totalOccurrences }, (_, index) => {
+        const occurrenceStart = addDaysToIsoDate(cursor, index * 7);
+        return {
+          startAt: occurrenceStart,
+          endAt: addMinutesToIsoDate(occurrenceStart, duration)
+        };
+      }).some((candidate) => hasPlannedBookingOverlap(candidate.startAt, candidate.endAt));
+
+      if (!hasSeriesConflict) {
+        suggestions.push(cursor);
+        cursor = addMinutesToIsoDate(cursor, 30);
+        continue;
+      }
+
+      cursor = addMinutesToIsoDate(cursor, 15);
+    }
+
+    return suggestions;
+  }, [
+    bookingConflictNotice,
+    bookingDurationMinutes,
+    bookingStartAtInput,
+    isRecurringBooking,
+    recurringWeeks,
+    bookings
+  ]);
 
   const moveBookingConflictNotice = useMemo(() => {
     if (!moveBookingId) {
@@ -1878,6 +2129,63 @@ function App() {
   }, [selectedClient, selectedClientId, isClientModalOpen]);
 
   useEffect(() => {
+    const activeClientIds = clients.filter((client) => !client.archived).map((client) => client.id);
+    if (!activeClientIds.length) {
+      if (timelineClientId) {
+        setTimelineClientId('');
+      }
+      return;
+    }
+
+    if (!timelineClientId || !activeClientIds.includes(timelineClientId)) {
+      setTimelineClientId(activeClientIds[0]);
+    }
+  }, [clients, timelineClientId]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        openCommandPalette();
+        return;
+      }
+
+      if (event.key === 'Escape' && isCommandPaletteOpen) {
+        event.preventDefault();
+        closeCommandPalette();
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isCommandPaletteOpen]);
+
+  useEffect(() => {
+    if (!isCommandPaletteOpen) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      commandPaletteInputRef.current?.focus();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [isCommandPaletteOpen]);
+
+  useEffect(() => {
+    if (!undoWindow) {
+      return;
+    }
+
+    const remainingMs = Math.max(0, undoWindow.expiresAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setUndoWindow((current) => (current?.id === undoWindow.id ? null : current));
+    }, remainingMs);
+
+    return () => window.clearTimeout(timer);
+  }, [undoWindow]);
+
+  useEffect(() => {
     if (isExerciseModalOpen && !selectedExerciseId) {
       // Creating a new exercise — don't replace the blank draft with fallback selection.
       return;
@@ -1917,9 +2225,258 @@ function App() {
     ];
   }, [bookings, clients, exercises.length, programs, sessionHistory.length, todayBookingCount]);
 
+  const analyticsCards = useMemo(() => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const monthBookings = bookings.filter((booking) => {
+      const stamp = new Date(booking.startAt).getTime();
+      return stamp >= monthStart.getTime() && stamp < nextMonthStart.getTime();
+    });
+
+    const completedMonthBookings = monthBookings.filter((booking) => booking.status === 'completed').length;
+    const cancelledMonthBookings = monthBookings.filter((booking) => booking.status === 'cancelled').length;
+    const resolvedMonthBookings = completedMonthBookings + cancelledMonthBookings;
+    const adherencePercent = resolvedMonthBookings > 0
+      ? Math.round((completedMonthBookings / resolvedMonthBookings) * 100)
+      : 0;
+
+    const sixWeeksMs = 6 * 7 * 24 * 60 * 60 * 1000;
+    const sixWeeksAgo = now.getTime() - sixWeeksMs;
+    const recentSessions = sessionHistory.filter((record) => new Date(record.finishedAt).getTime() >= sixWeeksAgo);
+    const totalRecentLoad = recentSessions.reduce((sum, record) => sum + record.totalLoadKg, 0);
+    const averageWeeklyLoad = totalRecentLoad / 6;
+    const averageWeeklySessions = recentSessions.length / 6;
+
+    return [
+      {
+        label: 'Adherence This Month',
+        value: `${adherencePercent}%`,
+        note: `${completedMonthBookings} completed | ${cancelledMonthBookings} cancelled`
+      },
+      {
+        label: 'Missed Bookings This Month',
+        value: String(cancelledMonthBookings),
+        note: `${monthBookings.length} total bookings in month`
+      },
+      {
+        label: 'Average Weekly Load (6w)',
+        value: `${Math.round(averageWeeklyLoad)} kg`,
+        note: `${averageWeeklySessions.toFixed(1)} sessions/week average`
+      }
+    ];
+  }, [bookings, sessionHistory]);
+
+  const commandPaletteItems = useMemo(() => {
+    const actionItems: CommandPaletteItem[] = [
+      {
+        id: 'action-dashboard',
+        type: 'action',
+        label: 'Go to Dashboard',
+        detail: 'Open studio overview and quick actions',
+        keywords: 'home dashboard overview',
+        execute: () => {
+          setView('dashboard');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-calendar',
+        type: 'action',
+        label: 'Go to Calendar',
+        detail: 'Plan sessions and resolve booking conflicts',
+        keywords: 'calendar bookings schedule',
+        execute: () => {
+          setView('calendar');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-clients',
+        type: 'action',
+        label: 'Go to Clients',
+        detail: 'Open client list and check-ins',
+        keywords: 'clients check-ins progress',
+        execute: () => {
+          setView('clients');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-programs',
+        type: 'action',
+        label: 'Go to Programs',
+        detail: 'Open program builder and templates',
+        keywords: 'programs templates workouts',
+        execute: () => {
+          setView('programs');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-session',
+        type: 'action',
+        label: 'Go to Session Mode',
+        detail: 'Start and track an active workout session',
+        keywords: 'session workout run training',
+        execute: () => {
+          setView('session');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-library',
+        type: 'action',
+        label: 'Go to Exercise Library',
+        detail: 'Browse and edit saved exercises',
+        keywords: 'library exercises catalog',
+        execute: () => {
+          setView('library');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-new-client',
+        type: 'action',
+        label: 'Create New Client',
+        detail: 'Open client editor with a blank draft',
+        keywords: 'new add client create',
+        execute: () => {
+          openQuickClientCreate();
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-new-program',
+        type: 'action',
+        label: 'Create New Program',
+        detail: 'Open program builder',
+        keywords: 'new add program create',
+        execute: () => {
+          setView('programs');
+          openNewProgramModal();
+          closeCommandPalette();
+        }
+      }
+    ];
+
+    const clientItems: CommandPaletteItem[] = clients
+      .filter((client) => !client.archived)
+      .map((client) => ({
+        id: `client-${client.id}`,
+        type: 'client',
+        label: client.name,
+        detail: `Client | ${client.status || 'Active'} | ${client.goal || 'No goal added'}`,
+        keywords: `${client.name} ${client.email} ${client.phone} ${client.goal} ${client.status}`.toLowerCase(),
+        execute: () => {
+          setView('clients');
+          openClientEditor(client);
+          closeCommandPalette();
+        }
+      }));
+
+    const programItems: CommandPaletteItem[] = programs
+      .filter((program) => !program.archived)
+      .map((program) => {
+        const clientName = clients.find((client) => client.id === program.clientId)?.name ?? 'Unassigned';
+        return {
+          id: `program-${program.id}`,
+          type: 'program' as const,
+          label: program.title,
+          detail: `Program | ${clientName} | ${program.exercises.length} exercises`,
+          keywords: `${program.title} ${program.focus} ${program.schedule} ${clientName}`.toLowerCase(),
+          execute: () => {
+            setView('programs');
+            openProgramEditor(program);
+            closeCommandPalette();
+          }
+        };
+      });
+
+    const exerciseItems: CommandPaletteItem[] = exercises.map((exercise) => ({
+      id: `exercise-${exercise.id}`,
+      type: 'exercise',
+      label: exercise.name,
+      detail: `Exercise | ${exercise.category} | ${exercise.equipment}`,
+      keywords: `${exercise.name} ${exercise.category} ${exercise.equipment} ${exercise.notes}`.toLowerCase(),
+      execute: () => {
+        setView('library');
+        openExerciseEditor(exercise);
+        closeCommandPalette();
+      }
+    }));
+
+    const bookingItems: CommandPaletteItem[] = upcomingBookings.slice(0, 20).map((booking) => ({
+      id: `booking-${booking.id}`,
+      type: 'booking',
+      label: `${booking.clientName} - ${booking.title}`,
+      detail: `Booking | ${formatDateTime(booking.startAt)}`,
+      keywords: `${booking.clientName} ${booking.title} ${booking.notes} booking calendar`.toLowerCase(),
+      execute: () => {
+        setView('calendar');
+        closeCommandPalette();
+      }
+    }));
+
+    return [...actionItems, ...clientItems, ...programItems, ...exerciseItems, ...bookingItems];
+  }, [clients, exercises, programs, upcomingBookings]);
+
+  const commandPaletteResults = useMemo(() => {
+    const query = commandPaletteQuery.trim().toLowerCase();
+    if (!query) {
+      return commandPaletteItems.slice(0, 14);
+    }
+
+    return commandPaletteItems
+      .filter((item) => {
+        const haystack = `${item.label} ${item.detail} ${item.keywords}`.toLowerCase();
+        return query.split(/\s+/).every((token) => haystack.includes(token));
+      })
+      .slice(0, 14);
+  }, [commandPaletteItems, commandPaletteQuery]);
+
   function flash(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 2200);
+  }
+
+  function openCommandPalette() {
+    setCommandPaletteQuery('');
+    setIsCommandPaletteOpen(true);
+  }
+
+  function closeCommandPalette() {
+    setIsCommandPaletteOpen(false);
+  }
+
+  function openUndoWindow(payload: { label: string; kind: 'snapshot' | 'bookings'; bookingsSnapshot?: CalendarBooking[] }) {
+    setUndoWindow({
+      id: createId('undo-window'),
+      label: payload.label,
+      kind: payload.kind,
+      bookingsSnapshot: payload.bookingsSnapshot,
+      expiresAt: Date.now() + 8000
+    });
+  }
+
+  function applyUndoWindow() {
+    if (!undoWindow) {
+      return;
+    }
+
+    const target = undoWindow;
+    setUndoWindow(null);
+
+    if (target.kind === 'snapshot') {
+      undoLastSnapshot();
+      return;
+    }
+
+    if (target.bookingsSnapshot) {
+      setBookings(target.bookingsSnapshot.map((booking) => ({ ...booking })));
+      flash('Booking change undone.');
+    }
   }
 
   function pushUndoSnapshot(label: string) {
@@ -1967,6 +2524,24 @@ function App() {
       setActiveSession(latest);
       return rest;
     });
+  }
+
+  function dismissRecoveredSessionNotice() {
+    setShowRecoveredSessionNotice(false);
+  }
+
+  function discardActiveSession() {
+    if (!activeSession) {
+      return;
+    }
+    if (!window.confirm('Discard this in-progress session?')) {
+      return;
+    }
+
+    setActiveSession(null);
+    setSessionEditHistory([]);
+    setShowRecoveredSessionNotice(false);
+    flash('In-progress session discarded.');
   }
 
   function openSecurityModal() {
@@ -2123,6 +2698,135 @@ function App() {
     anchor.click();
     URL.revokeObjectURL(link);
     flash('Client progress CSV exported.');
+  }
+
+  function exportScopedData() {
+    const scopedClients = exportClientId === 'all'
+      ? clients
+      : clients.filter((client) => client.id === exportClientId);
+
+    if (!scopedClients.length) {
+      flash('Select a valid client for scoped export.');
+      return;
+    }
+
+    const scopedClientIds = new Set(scopedClients.map((client) => client.id));
+    const scopedPrograms = programs.filter((program) => scopedClientIds.has(program.clientId));
+    const scopedSessions = sessionHistory.filter(
+      (record) => scopedClientIds.has(record.clientId) && isIsoWithinDateRange(record.finishedAt, exportStartDate, exportEndDate)
+    );
+    const scopedBookings = bookings.filter(
+      (booking) => scopedClientIds.has(booking.clientId) && isIsoWithinDateRange(booking.startAt, exportStartDate, exportEndDate)
+    );
+
+    const scopedExerciseIds = new Set(scopedPrograms.flatMap((program) => program.exercises.map((exercise) => exercise.exerciseId)));
+    const scopedExercises = exportClientId === 'all'
+      ? exercises
+      : exercises.filter((exercise) => scopedExerciseIds.has(exercise.id));
+
+    const payload = JSON.stringify(
+      {
+        version: 1,
+        clients: scopedClients,
+        exercises: scopedExercises,
+        programs: scopedPrograms,
+        sessions: scopedSessions,
+        bookings: scopedBookings
+      },
+      null,
+      2
+    );
+
+    const clientLabel = exportClientId === 'all'
+      ? 'all-clients'
+      : toFileLabel(scopedClients[0]?.name ?? 'client');
+    const dateLabel = exportStartDate || exportEndDate
+      ? `${exportStartDate || 'start'}-to-${exportEndDate || 'end'}`
+      : 'all-time';
+
+    const blob = new Blob([payload], { type: 'application/json' });
+    const link = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = link;
+    anchor.download = `superset-backup-${clientLabel}-${dateLabel}.json`;
+    anchor.click();
+    URL.revokeObjectURL(link);
+    flash(`Scoped backup exported (${scopedClients.length} clients, ${scopedSessions.length} sessions).`);
+  }
+
+  function exportScopedProgressCsv() {
+    const scopedClients = exportClientId === 'all'
+      ? clients
+      : clients.filter((client) => client.id === exportClientId);
+
+    if (!scopedClients.length) {
+      flash('Select a valid client for scoped progress export.');
+      return;
+    }
+
+    const progressRows = scopedClients.reduce((count, client) => {
+      const measurementsCount = client.measurementHistory.filter((snapshot) =>
+        isIsoWithinDateRange(snapshot.recordedAt, exportStartDate, exportEndDate)
+      ).length;
+      const checkInsCount = client.checkIns.filter((entry) =>
+        isIsoWithinDateRange(entry.recordedAt, exportStartDate, exportEndDate)
+      ).length;
+      return count + measurementsCount + checkInsCount;
+    }, 0);
+
+    if (!progressRows) {
+      flash('No progress entries match this export scope.');
+      return;
+    }
+
+    const payload = buildClientProgressCsv(scopedClients, exportStartDate, exportEndDate);
+    const clientLabel = exportClientId === 'all'
+      ? 'all-clients'
+      : toFileLabel(scopedClients[0]?.name ?? 'client');
+    const dateLabel = exportStartDate || exportEndDate
+      ? `${exportStartDate || 'start'}-to-${exportEndDate || 'end'}`
+      : 'all-time';
+
+    const blob = new Blob([payload], { type: 'text/csv;charset=utf-8' });
+    const link = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = link;
+    anchor.download = `superset-client-progress-${clientLabel}-${dateLabel}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(link);
+    flash(`Scoped progress CSV exported (${progressRows} rows).`);
+  }
+
+  function exportScopedCalendarIcs() {
+    const scopedClientIds = new Set(
+      exportClientId === 'all'
+        ? clients.map((client) => client.id)
+        : clients.filter((client) => client.id === exportClientId).map((client) => client.id)
+    );
+
+    if (!scopedClientIds.size) {
+      flash('Select a valid client for scoped calendar export.');
+      return;
+    }
+
+    const exportable = bookings
+      .filter((booking) => booking.status !== 'cancelled')
+      .filter((booking) => scopedClientIds.has(booking.clientId))
+      .filter((booking) => isIsoWithinDateRange(booking.startAt, exportStartDate, exportEndDate));
+
+    if (!exportable.length) {
+      flash('No bookings match this calendar export scope.');
+      return;
+    }
+
+    const client = clients.find((entry) => entry.id === exportClientId) ?? null;
+    const clientLabel = client ? toFileLabel(client.name) : 'all-clients';
+    const dateLabel = exportStartDate || exportEndDate
+      ? `${exportStartDate || 'start'}-to-${exportEndDate || 'end'}`
+      : 'all-time';
+    const fileName = `superset-calendar-${clientLabel}-${dateLabel}.ics`;
+    const calendarName = client ? `${client.name} Sessions` : 'Superset Bookings';
+    downloadCalendarFile(fileName, calendarName, exportable);
   }
 
   async function copyClientUpdate(program: Program) {
@@ -2356,6 +3060,8 @@ function App() {
   }
 
   function setBookingStatus(bookingId: string, status: CalendarBookingStatus) {
+    const previousBookings = bookings.map((booking) => ({ ...booking }));
+
     setBookings((current) =>
       current.map((booking) =>
         booking.id === bookingId
@@ -2366,6 +3072,18 @@ function App() {
           : booking
       )
     );
+
+    const statusLabel = status === 'cancelled'
+      ? 'Booking cancelled.'
+      : status === 'completed'
+        ? 'Booking marked as completed.'
+        : 'Booking moved back to planned.';
+
+    openUndoWindow({
+      label: `${statusLabel} Undo available for a few seconds.`,
+      kind: 'bookings',
+      bookingsSnapshot: previousBookings
+    });
 
     if (status === 'completed') {
       flash('Booking marked as completed.');
@@ -2715,6 +3433,10 @@ function App() {
     setClientModalBaseline(serializeClientDraft({ ...clientDraft, archived: true }));
     setIsClientModalOpen(false);
     flash('Client archived.');
+    openUndoWindow({
+      label: 'Client archived. Undo available for a few seconds.',
+      kind: 'snapshot'
+    });
   }
 
   function restoreClient(clientId: string) {
@@ -2893,6 +3615,10 @@ function App() {
     setProgramModalBaseline(serializeProgramDraft(archivedDraft));
     setIsProgramModalOpen(false);
     flash('Program archived.');
+    openUndoWindow({
+      label: 'Program archived. Undo available for a few seconds.',
+      kind: 'snapshot'
+    });
   }
 
   function restoreProgram(programId: string) {
@@ -2920,10 +3646,12 @@ function App() {
       return;
     }
 
+    const copyDateTag = formatProgramCopyDateTag(new Date());
+
     const copy: Program = {
       ...source,
       id: createId('program'),
-      title: `${source.title} Copy`,
+      title: `${source.title} (${copyDateTag})`,
       archived: false,
       exercises: source.exercises.map((exercise) => ({ ...exercise, id: createId('prog-ex') }))
     };
@@ -2942,7 +3670,7 @@ function App() {
     setProgramDraft(copy);
     setProgramModalBaseline(serializeProgramDraft(copy));
     setIsProgramModalOpen(true);
-    flash('Program duplicated.');
+    flash(`Program duplicated as ${copy.title}.`);
   }
 
   function openProgramEditor(program: Program) {
@@ -2963,6 +3691,10 @@ function App() {
   }
 
   function startSession() {
+    if (activeSession && !window.confirm('Replace the current in-progress session?')) {
+      return;
+    }
+
     const client = clients.find((entry) => entry.id === sessionClientId);
     const program = programs.find((entry) => entry.id === sessionProgramId);
 
@@ -2986,6 +3718,7 @@ function App() {
       entries
     });
     setSessionEditHistory([]);
+    setShowRecoveredSessionNotice(false);
     flash('Session ready.');
   }
 
@@ -3172,6 +3905,7 @@ function App() {
     ]);
     setActiveSession(null);
     setSessionEditHistory([]);
+    setShowRecoveredSessionNotice(false);
     flash('Session saved.');
   }
 
@@ -3323,17 +4057,60 @@ function App() {
 
         <div className="hero-actions">
           <div className="action-drawer card">
-            <button className="button button-secondary drawer-toggle" onClick={() => setIsDataDrawerOpen((current) => !current)} type="button">
+            <button className="button button-secondary drawer-toggle" onClick={() => setIsDataDrawerOpen((current) => !current)} aria-expanded={isDataDrawerOpen} type="button">
               {isDataDrawerOpen ? 'Hide data tools' : 'Show data tools'}
             </button>
             {isDataDrawerOpen ? (
               <div className="drawer-content">
+                <button className="button button-secondary" onClick={openCommandPalette} type="button">
+                  Search everywhere
+                </button>
                 <button className="button button-primary" onClick={exportData} type="button">
                   Export backup
                 </button>
                 <button className="button button-secondary" onClick={exportProgressCsv} type="button">
                   Export progress CSV
                 </button>
+                <section className="tools-attention-block export-tools-block" aria-label="Targeted export controls">
+                  <p className="tools-attention-title">Targeted export scope</p>
+                  <SelectField
+                    label="Client"
+                    value={exportClientId}
+                    options={exportClientOptions}
+                    onChange={setExportClientId}
+                  />
+                  <div className="form-grid two-up export-date-grid">
+                    <label className="field">
+                      <span>Start date</span>
+                      <input
+                        className="field-input"
+                        type="date"
+                        value={exportStartDate}
+                        onChange={(event) => setExportStartDate(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>End date</span>
+                      <input
+                        className="field-input"
+                        type="date"
+                        value={exportEndDate}
+                        onChange={(event) => setExportEndDate(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="actions-row">
+                    <button className="button button-secondary compact-button" onClick={exportScopedData} type="button">
+                      Export scoped backup
+                    </button>
+                    <button className="button button-secondary compact-button" onClick={exportScopedProgressCsv} type="button">
+                      Export scoped CSV
+                    </button>
+                    <button className="button button-secondary compact-button" onClick={exportScopedCalendarIcs} type="button">
+                      Export scoped calendar
+                    </button>
+                  </div>
+                </section>
                 <button className="button button-secondary" onClick={undoLastSnapshot} disabled={!undoSnapshots.length} type="button">
                   Undo archive action
                 </button>
@@ -3345,7 +4122,7 @@ function App() {
           </div>
 
           <div className="action-drawer card">
-            <button className="button button-secondary drawer-toggle" onClick={() => setIsSecurityDrawerOpen((current) => !current)} type="button">
+            <button className="button button-secondary drawer-toggle" onClick={() => setIsSecurityDrawerOpen((current) => !current)} aria-expanded={isSecurityDrawerOpen} type="button">
               {isSecurityDrawerOpen ? 'Hide security' : 'Show security'}
             </button>
             {isSecurityDrawerOpen ? (
@@ -3370,6 +4147,7 @@ function App() {
             className={view === item.key ? 'tab active' : 'tab'}
             onClick={() => setView(item.key)}
             aria-label={item.label}
+            aria-current={view === item.key ? 'page' : undefined}
             title={item.label}
             type="button"
           >
@@ -3380,7 +4158,20 @@ function App() {
         ))}
       </nav>
 
-      {notice ? <div className="notice card">{notice}</div> : null}
+      {notice ? (
+        <div className="notice card" role="status" aria-live="polite">
+          {notice}
+        </div>
+      ) : null}
+
+      {undoWindow ? (
+        <div className="undo-window card" role="status" aria-live="polite">
+          <p>{undoWindow.label}</p>
+          <button className="button button-secondary compact-button" onClick={applyUndoWindow} type="button">
+            Undo
+          </button>
+        </div>
+      ) : null}
 
       {isMobileToolsOpen ? (
         <div className="mobile-sheet-backdrop" role="presentation" onClick={() => setIsMobileToolsOpen(false)}>
@@ -3443,12 +4234,55 @@ function App() {
               )}
             </section>
             <div className="drawer-content">
+              <button className="button button-secondary" onClick={() => { openCommandPalette(); setIsMobileToolsOpen(false); }} type="button">
+                Search everywhere
+              </button>
               <button className="button button-primary" onClick={() => { exportData(); setIsMobileToolsOpen(false); }} type="button">
                 Export backup
               </button>
               <button className="button button-secondary" onClick={() => { exportProgressCsv(); setIsMobileToolsOpen(false); }} type="button">
                 Export progress CSV
               </button>
+              <section className="tools-attention-block export-tools-block" aria-label="Targeted export controls">
+                <p className="tools-attention-title">Targeted export scope</p>
+                <SelectField
+                  label="Client"
+                  value={exportClientId}
+                  options={exportClientOptions}
+                  onChange={setExportClientId}
+                />
+                <div className="form-grid two-up export-date-grid">
+                  <label className="field">
+                    <span>Start date</span>
+                    <input
+                      className="field-input"
+                      type="date"
+                      value={exportStartDate}
+                      onChange={(event) => setExportStartDate(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>End date</span>
+                    <input
+                      className="field-input"
+                      type="date"
+                      value={exportEndDate}
+                      onChange={(event) => setExportEndDate(event.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="actions-row">
+                  <button className="button button-secondary compact-button" onClick={() => { exportScopedData(); setIsMobileToolsOpen(false); }} type="button">
+                    Export scoped backup
+                  </button>
+                  <button className="button button-secondary compact-button" onClick={() => { exportScopedProgressCsv(); setIsMobileToolsOpen(false); }} type="button">
+                    Export scoped CSV
+                  </button>
+                  <button className="button button-secondary compact-button" onClick={() => { exportScopedCalendarIcs(); setIsMobileToolsOpen(false); }} type="button">
+                    Export scoped calendar
+                  </button>
+                </div>
+              </section>
               <button className="button button-secondary" onClick={() => { undoLastSnapshot(); setIsMobileToolsOpen(false); }} disabled={!hasUndoPending} type="button">
                 Undo archive action
               </button>
@@ -3494,6 +4328,58 @@ function App() {
               <button className="button button-secondary" onClick={() => setIsSecurityModalOpen(false)} type="button">
                 Close
               </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isCommandPaletteOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={closeCommandPalette}>
+          <section
+            className="modal card command-palette"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Search everywhere"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="section-heading compact">
+              <div>
+                <span className="eyebrow">Search</span>
+                <h2>Command palette</h2>
+              </div>
+              <button className="button button-secondary compact-button" onClick={closeCommandPalette} type="button">
+                Close
+              </button>
+            </div>
+
+            <input
+              ref={commandPaletteInputRef}
+              className="field-input command-palette-input"
+              value={commandPaletteQuery}
+              onChange={(event) => setCommandPaletteQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && commandPaletteResults[0]) {
+                  event.preventDefault();
+                  commandPaletteResults[0].execute();
+                }
+              }}
+              placeholder="Search clients, programs, exercises, bookings, or actions..."
+            />
+
+            <div className="command-palette-results">
+              {commandPaletteResults.length ? (
+                commandPaletteResults.map((item) => (
+                  <button className="item-row command-palette-item" key={item.id} onClick={item.execute} type="button">
+                    <div>
+                      <strong>{item.label}</strong>
+                      <p>{item.detail}</p>
+                    </div>
+                    <span className="pill">{item.type}</span>
+                  </button>
+                ))
+              ) : (
+                <p className="empty-copy">No matches found. Try another search phrase.</p>
+              )}
             </div>
           </section>
         </div>
@@ -3566,7 +4452,14 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">No upcoming sessions scheduled yet.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No upcoming sessions scheduled yet.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setView('calendar')} type="button">
+                        Schedule first booking
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -3600,7 +4493,14 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">No sessions saved yet. Your first run will appear here.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No sessions saved yet. Your first run will appear here.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setView('session')} type="button">
+                        Start first session
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
@@ -3656,9 +4556,23 @@ function App() {
                     </button>
                   ))
                 ) : recentlyEdited.length ? (
-                  <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setRecentlyEditedFilter('all')} type="button">
+                        Show all edits
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={openQuickClientCreate} type="button">
+                        Create first client
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
@@ -3682,7 +4596,14 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">No clients due this week.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No clients due this week.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setView('clients')} type="button">
+                        Review client list
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
@@ -3708,8 +4629,33 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">Save sessions with set weight to see load trends.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">Save sessions with set weight to see load trends.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setView('session')} type="button">
+                        Run and save a session
+                      </button>
+                    </div>
+                  </div>
                 )}
+              </div>
+            </section>
+
+            <section className="panel card panel-span-2">
+              <div className="section-heading compact">
+                <div>
+                  <span className="eyebrow">Analytics</span>
+                  <h2>Coaching metrics at a glance</h2>
+                </div>
+              </div>
+              <div className="stats-grid">
+                {analyticsCards.map((card) => (
+                  <article className="stat-card" key={card.label}>
+                    <span className="stat-label">{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <span className="stat-note">{card.note}</span>
+                  </article>
+                ))}
               </div>
             </section>
           </>
@@ -3854,7 +4800,14 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">No upcoming sessions scheduled yet.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No upcoming sessions scheduled yet.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={openBookingModalForCreate} disabled={!clientOptionValues.length} type="button">
+                        Create booking
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
@@ -3989,6 +4942,21 @@ function App() {
                       </div>
                       {recurringBookingSummary && !bookingConflictNotice ? <p className="booking-helper muted-text">{recurringBookingSummary}</p> : null}
                       {bookingConflictNotice ? <p className="inline-warning">{bookingConflictNotice}</p> : null}
+                      {bookingConflictSuggestions.length ? (
+                        <div className="booking-suggestion-row">
+                          <span className="muted-text">Try next free slot:</span>
+                          {bookingConflictSuggestions.map((isoValue) => (
+                            <button
+                              key={isoValue}
+                              className="button button-secondary compact-button"
+                              onClick={() => setBookingStartAtInput(toDateTimeLocalValue(isoValue))}
+                              type="button"
+                            >
+                              {formatDateTime(isoValue)}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </>
                   ) : null}
                 </section>
@@ -4073,6 +5041,40 @@ function App() {
                 </div>
               </section>
 
+              <section className="tools-attention-block clients-timeline-card">
+                <div className="section-heading compact">
+                  <div>
+                    <span className="eyebrow">Client timeline</span>
+                    <h3>Progress and activity feed</h3>
+                  </div>
+                  <span className="pill">{clientTimelineEvents.length} events</span>
+                </div>
+
+                <div className="timeline-controls">
+                  <SelectField
+                    label="Timeline client"
+                    value={timelineClientId}
+                    options={clientOptionValues}
+                    onChange={setTimelineClientId}
+                  />
+                </div>
+
+                <div className="history-list">
+                  {clientTimelineEvents.length ? (
+                    clientTimelineEvents.slice(0, 18).map((event) => (
+                      <article className="history-row" key={event.id}>
+                        <strong>{formatDateTime(event.occurredAt)}</strong>
+                        <span className={`timeline-kind timeline-kind-${event.kind}`}>{event.kindLabel}</span>
+                        <span>{event.title}</span>
+                        <span>{event.detail}</span>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="empty-copy">No timeline activity yet for this client.</p>
+                  )}
+                </div>
+              </section>
+
               <div className="item-list">
                 {filteredClients.map((client) => (
                   <button
@@ -4088,7 +5090,19 @@ function App() {
                     <span className="pill">{client.archived ? 'Archived' : client.status}</span>
                   </button>
                 ))}
-                {filteredClients.length === 0 ? <p className="empty-copy">No clients match this filter.</p> : null}
+                {filteredClients.length === 0 ? (
+                  <div className="empty-guided">
+                    <p className="empty-copy">No clients match this filter.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={clearClientFilters} type="button">
+                        Clear filters
+                      </button>
+                      <button className="button button-secondary compact-button" onClick={openNewClientModal} type="button">
+                        Add client
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
 
@@ -4277,21 +5291,41 @@ function App() {
                 {filteredPrograms.map((program) => {
                   const client = clients.find((entry) => entry.id === program.clientId);
                   return (
-                    <button
-                      key={program.id}
-                      className={selectedProgramId === program.id ? 'item-row active' : 'item-row'}
-                      onClick={() => openProgramEditor(program)}
-                      type="button"
-                    >
-                      <div>
+                    <article key={program.id} className={selectedProgramId === program.id ? 'item-row active' : 'item-row'}>
+                      <button
+                        className="text-button"
+                        onClick={() => openProgramEditor(program)}
+                        type="button"
+                      >
                         <strong>{program.title}</strong>
                         <p>{client?.name ?? 'Unassigned client'}</p>
+                      </button>
+                      <div className="program-item-meta">
+                        <span className="pill">{program.archived ? 'Archived' : `${program.exercises.length} moves`}</span>
+                        <button
+                          className="button button-secondary compact-button"
+                          onClick={() => duplicateProgram(program.id)}
+                          type="button"
+                        >
+                          Duplicate
+                        </button>
                       </div>
-                      <span className="pill">{program.archived ? 'Archived' : `${program.exercises.length} moves`}</span>
-                    </button>
+                    </article>
                   );
                 })}
-                {filteredPrograms.length === 0 ? <p className="empty-copy">No programs match this filter.</p> : null}
+                {filteredPrograms.length === 0 ? (
+                  <div className="empty-guided">
+                    <p className="empty-copy">No programs match this filter.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={clearProgramFilters} type="button">
+                        Clear filters
+                      </button>
+                      <button className="button button-secondary compact-button" onClick={openNewProgramModal} type="button">
+                        Add program
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
 
@@ -4500,6 +5534,21 @@ function App() {
 
               {activeSession ? (
                 <>
+                  {showRecoveredSessionNotice ? (
+                    <section className="tools-attention-block">
+                      <p className="tools-attention-title">Recovered session draft</p>
+                      <p className="empty-copy">Resumed your in-progress session after refresh.</p>
+                      <div className="actions-row">
+                        <button className="button button-secondary compact-button" onClick={dismissRecoveredSessionNotice} type="button">
+                          Keep working
+                        </button>
+                        <button className="button button-danger compact-button" onClick={discardActiveSession} type="button">
+                          Discard draft
+                        </button>
+                      </div>
+                    </section>
+                  ) : null}
+
                   <div className="detail-strip">
                     <span>{activeSession.clientName}</span>
                     <span>{activeSession.programName}</span>
@@ -4614,10 +5663,10 @@ function App() {
                     <button className="button button-secondary" onClick={undoSessionEdit} disabled={!sessionEditHistory.length} type="button">
                       Undo last edit
                     </button>
-                    <button className="button button-secondary" onClick={() => setActiveSession(null)} type="button">
+                    <button className="button button-secondary" onClick={discardActiveSession} type="button">
                       Discard session
                     </button>
-                    <button className="button button-secondary" onClick={() => setActiveSession(null)} type="button">
+                    <button className="button button-secondary" onClick={discardActiveSession} type="button">
                       Reset view
                     </button>
                   </div>
@@ -4626,6 +5675,11 @@ function App() {
                 <div className="empty-state">
                   <h3>No active session yet</h3>
                   <p>Choose a client and program above to generate the live workout view.</p>
+                  <div className="actions-row">
+                    <button className="button button-secondary" onClick={startSession} type="button">
+                      Start selected session
+                    </button>
+                  </div>
                 </div>
               )}
             </section>
@@ -4679,7 +5733,19 @@ function App() {
                     <span className="pill">{exercise.equipment}</span>
                   </button>
                 ))}
-                {filteredExercises.length === 0 ? <p className="empty-copy">No exercises match this filter.</p> : null}
+                {filteredExercises.length === 0 ? (
+                  <div className="empty-guided">
+                    <p className="empty-copy">No exercises match this filter.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={clearExerciseFilters} type="button">
+                        Clear search
+                      </button>
+                      <button className="button button-secondary compact-button" onClick={openNewExerciseModal} type="button">
+                        Add exercise
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
 
@@ -4757,6 +5823,9 @@ function App() {
         <button className="button button-secondary" onClick={openSessionView} type="button">
           Start session
         </button>
+        <button className="button button-secondary" onClick={openCommandPalette} type="button">
+          Search
+        </button>
       </div>
 
       <nav className="mobile-nav card" aria-label="Mobile app sections">
@@ -4769,6 +5838,7 @@ function App() {
               setIsMobileToolsOpen(false);
             }}
             aria-label={item.mobileLabel}
+            aria-current={view === item.key ? 'page' : undefined}
             title={item.mobileLabel}
             type="button"
           >
@@ -4780,6 +5850,8 @@ function App() {
           className={hasToolsAttention ? `${isMobileToolsOpen ? 'mobile-tab active' : 'mobile-tab'} attention` : isMobileToolsOpen ? 'mobile-tab active' : 'mobile-tab'}
           onClick={() => setIsMobileToolsOpen((current) => !current)}
           aria-label={hasToolsAttention ? `Tools with ${toolsBadgeLabel} pending items` : 'Tools'}
+          aria-expanded={isMobileToolsOpen}
+          aria-current={isMobileToolsOpen ? 'page' : undefined}
           title="Tools"
           type="button"
         >
