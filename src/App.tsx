@@ -171,6 +171,15 @@ type ClientTimelineEvent = {
   detail: string;
 };
 
+type CommandPaletteItem = {
+  id: string;
+  type: 'action' | 'client' | 'program' | 'exercise' | 'booking';
+  label: string;
+  detail: string;
+  keywords: string;
+  execute: () => void;
+};
+
 type DueCheckInDismissals = Record<string, string>;
 
 const STORAGE_KEYS = {
@@ -1438,11 +1447,14 @@ function App() {
   const [isDataDrawerOpen, setIsDataDrawerOpen] = useState(false);
   const [isSecurityDrawerOpen, setIsSecurityDrawerOpen] = useState(false);
   const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState('');
   const [notice, setNotice] = useState('');
   const [momentQuote] = useState(
     () => MOMENT_QUOTES[Math.floor(Math.random() * MOMENT_QUOTES.length)]
   );
   const importInputRef = useRef<HTMLInputElement>(null);
+  const commandPaletteInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.clients, JSON.stringify(clients));
@@ -2080,6 +2092,36 @@ function App() {
   }, [clients, timelineClientId]);
 
   useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        openCommandPalette();
+        return;
+      }
+
+      if (event.key === 'Escape' && isCommandPaletteOpen) {
+        event.preventDefault();
+        closeCommandPalette();
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isCommandPaletteOpen]);
+
+  useEffect(() => {
+    if (!isCommandPaletteOpen) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      commandPaletteInputRef.current?.focus();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [isCommandPaletteOpen]);
+
+  useEffect(() => {
     if (isExerciseModalOpen && !selectedExerciseId) {
       // Creating a new exercise — don't replace the blank draft with fallback selection.
       return;
@@ -2162,9 +2204,186 @@ function App() {
     ];
   }, [bookings, sessionHistory]);
 
+  const commandPaletteItems = useMemo(() => {
+    const actionItems: CommandPaletteItem[] = [
+      {
+        id: 'action-dashboard',
+        type: 'action',
+        label: 'Go to Dashboard',
+        detail: 'Open studio overview and quick actions',
+        keywords: 'home dashboard overview',
+        execute: () => {
+          setView('dashboard');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-calendar',
+        type: 'action',
+        label: 'Go to Calendar',
+        detail: 'Plan sessions and resolve booking conflicts',
+        keywords: 'calendar bookings schedule',
+        execute: () => {
+          setView('calendar');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-clients',
+        type: 'action',
+        label: 'Go to Clients',
+        detail: 'Open client list and check-ins',
+        keywords: 'clients check-ins progress',
+        execute: () => {
+          setView('clients');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-programs',
+        type: 'action',
+        label: 'Go to Programs',
+        detail: 'Open program builder and templates',
+        keywords: 'programs templates workouts',
+        execute: () => {
+          setView('programs');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-session',
+        type: 'action',
+        label: 'Go to Session Mode',
+        detail: 'Start and track an active workout session',
+        keywords: 'session workout run training',
+        execute: () => {
+          setView('session');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-library',
+        type: 'action',
+        label: 'Go to Exercise Library',
+        detail: 'Browse and edit saved exercises',
+        keywords: 'library exercises catalog',
+        execute: () => {
+          setView('library');
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-new-client',
+        type: 'action',
+        label: 'Create New Client',
+        detail: 'Open client editor with a blank draft',
+        keywords: 'new add client create',
+        execute: () => {
+          openQuickClientCreate();
+          closeCommandPalette();
+        }
+      },
+      {
+        id: 'action-new-program',
+        type: 'action',
+        label: 'Create New Program',
+        detail: 'Open program builder',
+        keywords: 'new add program create',
+        execute: () => {
+          setView('programs');
+          openNewProgramModal();
+          closeCommandPalette();
+        }
+      }
+    ];
+
+    const clientItems: CommandPaletteItem[] = clients
+      .filter((client) => !client.archived)
+      .map((client) => ({
+        id: `client-${client.id}`,
+        type: 'client',
+        label: client.name,
+        detail: `Client | ${client.status || 'Active'} | ${client.goal || 'No goal added'}`,
+        keywords: `${client.name} ${client.email} ${client.phone} ${client.goal} ${client.status}`.toLowerCase(),
+        execute: () => {
+          setView('clients');
+          openClientEditor(client);
+          closeCommandPalette();
+        }
+      }));
+
+    const programItems: CommandPaletteItem[] = programs
+      .filter((program) => !program.archived)
+      .map((program) => {
+        const clientName = clients.find((client) => client.id === program.clientId)?.name ?? 'Unassigned';
+        return {
+          id: `program-${program.id}`,
+          type: 'program' as const,
+          label: program.title,
+          detail: `Program | ${clientName} | ${program.exercises.length} exercises`,
+          keywords: `${program.title} ${program.focus} ${program.schedule} ${clientName}`.toLowerCase(),
+          execute: () => {
+            setView('programs');
+            openProgramEditor(program);
+            closeCommandPalette();
+          }
+        };
+      });
+
+    const exerciseItems: CommandPaletteItem[] = exercises.map((exercise) => ({
+      id: `exercise-${exercise.id}`,
+      type: 'exercise',
+      label: exercise.name,
+      detail: `Exercise | ${exercise.category} | ${exercise.equipment}`,
+      keywords: `${exercise.name} ${exercise.category} ${exercise.equipment} ${exercise.notes}`.toLowerCase(),
+      execute: () => {
+        setView('library');
+        openExerciseEditor(exercise);
+        closeCommandPalette();
+      }
+    }));
+
+    const bookingItems: CommandPaletteItem[] = upcomingBookings.slice(0, 20).map((booking) => ({
+      id: `booking-${booking.id}`,
+      type: 'booking',
+      label: `${booking.clientName} - ${booking.title}`,
+      detail: `Booking | ${formatDateTime(booking.startAt)}`,
+      keywords: `${booking.clientName} ${booking.title} ${booking.notes} booking calendar`.toLowerCase(),
+      execute: () => {
+        setView('calendar');
+        closeCommandPalette();
+      }
+    }));
+
+    return [...actionItems, ...clientItems, ...programItems, ...exerciseItems, ...bookingItems];
+  }, [clients, exercises, programs, upcomingBookings]);
+
+  const commandPaletteResults = useMemo(() => {
+    const query = commandPaletteQuery.trim().toLowerCase();
+    if (!query) {
+      return commandPaletteItems.slice(0, 14);
+    }
+
+    return commandPaletteItems
+      .filter((item) => {
+        const haystack = `${item.label} ${item.detail} ${item.keywords}`.toLowerCase();
+        return query.split(/\s+/).every((token) => haystack.includes(token));
+      })
+      .slice(0, 14);
+  }, [commandPaletteItems, commandPaletteQuery]);
+
   function flash(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 2200);
+  }
+
+  function openCommandPalette() {
+    setCommandPaletteQuery('');
+    setIsCommandPaletteOpen(true);
+  }
+
+  function closeCommandPalette() {
+    setIsCommandPaletteOpen(false);
   }
 
   function pushUndoSnapshot(label: string) {
@@ -3599,6 +3818,9 @@ function App() {
             </button>
             {isDataDrawerOpen ? (
               <div className="drawer-content">
+                <button className="button button-secondary" onClick={openCommandPalette} type="button">
+                  Search everywhere
+                </button>
                 <button className="button button-primary" onClick={exportData} type="button">
                   Export backup
                 </button>
@@ -3714,6 +3936,9 @@ function App() {
               )}
             </section>
             <div className="drawer-content">
+              <button className="button button-secondary" onClick={() => { openCommandPalette(); setIsMobileToolsOpen(false); }} type="button">
+                Search everywhere
+              </button>
               <button className="button button-primary" onClick={() => { exportData(); setIsMobileToolsOpen(false); }} type="button">
                 Export backup
               </button>
@@ -3765,6 +3990,58 @@ function App() {
               <button className="button button-secondary" onClick={() => setIsSecurityModalOpen(false)} type="button">
                 Close
               </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isCommandPaletteOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={closeCommandPalette}>
+          <section
+            className="modal card command-palette"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Search everywhere"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="section-heading compact">
+              <div>
+                <span className="eyebrow">Search</span>
+                <h2>Command palette</h2>
+              </div>
+              <button className="button button-secondary compact-button" onClick={closeCommandPalette} type="button">
+                Close
+              </button>
+            </div>
+
+            <input
+              ref={commandPaletteInputRef}
+              className="field-input command-palette-input"
+              value={commandPaletteQuery}
+              onChange={(event) => setCommandPaletteQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && commandPaletteResults[0]) {
+                  event.preventDefault();
+                  commandPaletteResults[0].execute();
+                }
+              }}
+              placeholder="Search clients, programs, exercises, bookings, or actions..."
+            />
+
+            <div className="command-palette-results">
+              {commandPaletteResults.length ? (
+                commandPaletteResults.map((item) => (
+                  <button className="item-row command-palette-item" key={item.id} onClick={item.execute} type="button">
+                    <div>
+                      <strong>{item.label}</strong>
+                      <p>{item.detail}</p>
+                    </div>
+                    <span className="pill">{item.type}</span>
+                  </button>
+                ))
+              ) : (
+                <p className="empty-copy">No matches found. Try another search phrase.</p>
+              )}
             </div>
           </section>
         </div>
@@ -5117,6 +5394,9 @@ function App() {
         </button>
         <button className="button button-secondary" onClick={openSessionView} type="button">
           Start session
+        </button>
+        <button className="button button-secondary" onClick={openCommandPalette} type="button">
+          Search
         </button>
       </div>
 
