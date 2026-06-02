@@ -170,6 +170,7 @@ const STORAGE_KEYS = {
   programs: 'superset.programs',
   sessions: 'superset.sessions',
   bookings: 'superset.bookings',
+  activeSessionDraft: 'superset.active-session-draft',
   lockHash: 'superset.lock.hash',
   recentlyEdited: 'superset.recently-edited',
   dueCheckInDismissals: 'superset.due-checkin-dismissals'
@@ -917,6 +918,57 @@ function normalizeSessionRecord(record: Partial<SessionRecord>): SessionRecord {
   };
 }
 
+function normalizeSessionSet(setState: Partial<SessionSet>): SessionSet {
+  return {
+    completed: Boolean(setState.completed),
+    reps: setState.reps ?? '',
+    weight: setState.weight ?? ''
+  };
+}
+
+function normalizeSessionEntry(entry: Partial<SessionEntry>): SessionEntry {
+  const initialSetStates = Array.isArray(entry.setStates)
+    ? entry.setStates.map((setState) => normalizeSessionSet(setState))
+    : [];
+  const parsedTargetSets = Number(entry.targetSets ?? initialSetStates.length ?? 1);
+  const targetSets = Number.isFinite(parsedTargetSets) && parsedTargetSets > 0
+    ? Math.floor(parsedTargetSets)
+    : Math.max(1, initialSetStates.length);
+
+  const setStates = initialSetStates.length
+    ? initialSetStates
+    : Array.from({ length: targetSets }, () => ({ completed: false, reps: entry.targetReps ?? '', weight: '' }));
+
+  return {
+    id: entry.id ?? createId('session-entry'),
+    exerciseId: entry.exerciseId ?? '',
+    exerciseName: entry.exerciseName ?? 'Exercise',
+    targetSets,
+    targetReps: entry.targetReps ?? '',
+    rest: entry.rest ?? '',
+    notes: entry.notes ?? '',
+    setStates
+  };
+}
+
+function normalizeActiveSession(session: Partial<ActiveSession> | null | undefined): ActiveSession | null {
+  if (!session || !session.clientId || !session.programId) {
+    return null;
+  }
+
+  return {
+    clientId: session.clientId,
+    clientName: session.clientName ?? '',
+    programId: session.programId,
+    programName: session.programName ?? '',
+    startedAt: session.startedAt ?? new Date().toISOString(),
+    notes: session.notes ?? '',
+    entries: Array.isArray(session.entries)
+      ? session.entries.map((entry) => normalizeSessionEntry(entry))
+      : []
+  };
+}
+
 function normalizeCalendarBooking(booking: Partial<CalendarBooking>): CalendarBooking {
   const startAt = booking.startAt ?? new Date().toISOString();
   const endAt = booking.endAt ?? new Date(new Date(startAt).getTime() + 60 * 60000).toISOString();
@@ -1320,7 +1372,12 @@ function App() {
   const [dueCheckInDismissals, setDueCheckInDismissals] = useState<DueCheckInDismissals>(() =>
     loadCollection<DueCheckInDismissals>(STORAGE_KEYS.dueCheckInDismissals, {})
   );
-  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [activeSession, setActiveSession] = useState<ActiveSession | null>(() =>
+    normalizeActiveSession(loadCollection<Partial<ActiveSession> | null>(STORAGE_KEYS.activeSessionDraft, null))
+  );
+  const [showRecoveredSessionNotice, setShowRecoveredSessionNotice] = useState(() =>
+    Boolean(normalizeActiveSession(loadCollection<Partial<ActiveSession> | null>(STORAGE_KEYS.activeSessionDraft, null)))
+  );
 
   const [clientDraft, setClientDraft] = useState<Client>(blankClient());
   const [exerciseDraft, setExerciseDraft] = useState<Exercise>(blankExercise());
@@ -1392,6 +1449,15 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(sessionHistory));
   }, [sessionHistory]);
+
+  useEffect(() => {
+    if (activeSession) {
+      window.localStorage.setItem(STORAGE_KEYS.activeSessionDraft, JSON.stringify(activeSession));
+      return;
+    }
+
+    window.localStorage.removeItem(STORAGE_KEYS.activeSessionDraft);
+  }, [activeSession]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.bookings, JSON.stringify(bookings));
@@ -2024,6 +2090,24 @@ function App() {
       setActiveSession(latest);
       return rest;
     });
+  }
+
+  function dismissRecoveredSessionNotice() {
+    setShowRecoveredSessionNotice(false);
+  }
+
+  function discardActiveSession() {
+    if (!activeSession) {
+      return;
+    }
+    if (!window.confirm('Discard this in-progress session?')) {
+      return;
+    }
+
+    setActiveSession(null);
+    setSessionEditHistory([]);
+    setShowRecoveredSessionNotice(false);
+    flash('In-progress session discarded.');
   }
 
   function openSecurityModal() {
@@ -3022,6 +3106,10 @@ function App() {
   }
 
   function startSession() {
+    if (activeSession && !window.confirm('Replace the current in-progress session?')) {
+      return;
+    }
+
     const client = clients.find((entry) => entry.id === sessionClientId);
     const program = programs.find((entry) => entry.id === sessionProgramId);
 
@@ -3045,6 +3133,7 @@ function App() {
       entries
     });
     setSessionEditHistory([]);
+    setShowRecoveredSessionNotice(false);
     flash('Session ready.');
   }
 
@@ -3231,6 +3320,7 @@ function App() {
     ]);
     setActiveSession(null);
     setSessionEditHistory([]);
+    setShowRecoveredSessionNotice(false);
     flash('Session saved.');
   }
 
@@ -4582,6 +4672,21 @@ function App() {
 
               {activeSession ? (
                 <>
+                  {showRecoveredSessionNotice ? (
+                    <section className="tools-attention-block">
+                      <p className="tools-attention-title">Recovered session draft</p>
+                      <p className="empty-copy">Resumed your in-progress session after refresh.</p>
+                      <div className="actions-row">
+                        <button className="button button-secondary compact-button" onClick={dismissRecoveredSessionNotice} type="button">
+                          Keep working
+                        </button>
+                        <button className="button button-danger compact-button" onClick={discardActiveSession} type="button">
+                          Discard draft
+                        </button>
+                      </div>
+                    </section>
+                  ) : null}
+
                   <div className="detail-strip">
                     <span>{activeSession.clientName}</span>
                     <span>{activeSession.programName}</span>
@@ -4696,10 +4801,10 @@ function App() {
                     <button className="button button-secondary" onClick={undoSessionEdit} disabled={!sessionEditHistory.length} type="button">
                       Undo last edit
                     </button>
-                    <button className="button button-secondary" onClick={() => setActiveSession(null)} type="button">
+                    <button className="button button-secondary" onClick={discardActiveSession} type="button">
                       Discard session
                     </button>
-                    <button className="button button-secondary" onClick={() => setActiveSession(null)} type="button">
+                    <button className="button button-secondary" onClick={discardActiveSession} type="button">
                       Reset view
                     </button>
                   </div>
