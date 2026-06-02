@@ -462,6 +462,43 @@ button {
   margin-bottom: 12px;
 }
 
+.clients-timeline-card {
+  margin-bottom: 12px;
+}
+
+.timeline-controls {
+  margin-bottom: 12px;
+}
+
+.timeline-kind {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.timeline-kind-session {
+  background: rgba(34, 197, 94, 0.2);
+  color: #bbf7d0;
+}
+
+.timeline-kind-booking {
+  background: rgba(249, 115, 22, 0.2);
+  color: #fed7aa;
+}
+
+.timeline-kind-measurement {
+  background: rgba(59, 130, 246, 0.2);
+  color: #bfdbfe;
+}
+
+.timeline-kind-check-in {
+  background: rgba(168, 85, 247, 0.2);
+  color: #ddd6fe;
+}
+
 .item-row strong,
 .record-row strong,
 .exercise-block strong,
@@ -1111,6 +1148,10 @@ button {
   .template-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .timeline-controls {
+    display: grid;
   }
 
   .calendar-actions-row,

@@ -162,6 +162,15 @@ type RecentlyEditedItem = {
   editedAt: string;
 };
 
+type ClientTimelineEvent = {
+  id: string;
+  kind: 'session' | 'booking' | 'measurement' | 'check-in';
+  kindLabel: string;
+  occurredAt: string;
+  title: string;
+  detail: string;
+};
+
 type DueCheckInDismissals = Record<string, string>;
 
 const STORAGE_KEYS = {
@@ -1398,6 +1407,7 @@ function App() {
   const [moveBookingStartAtInput, setMoveBookingStartAtInput] = useState('');
   const [moveBookingDurationMinutes, setMoveBookingDurationMinutes] = useState('60');
   const [selectedClientId, setSelectedClientId] = useState(seedClients[0]?.id ?? '');
+  const [timelineClientId, setTimelineClientId] = useState(seedClients[0]?.id ?? '');
   const [selectedExerciseId, setSelectedExerciseId] = useState(seedExercises[0]?.id ?? '');
   const [selectedProgramId, setSelectedProgramId] = useState(seedPrograms[0]?.id ?? '');
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
@@ -1631,6 +1641,61 @@ function App() {
   const hasSessionProgramsForClient = programs.some(
     (program) => program.clientId === sessionClientId && !program.archived
   );
+
+  const timelineClient = useMemo(
+    () => clients.find((client) => client.id === timelineClientId) ?? null,
+    [clients, timelineClientId]
+  );
+
+  const clientTimelineEvents = useMemo(() => {
+    if (!timelineClient) {
+      return [] as ClientTimelineEvent[];
+    }
+
+    const measurementEvents: ClientTimelineEvent[] = timelineClient.measurementHistory.map((snapshot) => ({
+      id: `measurement-${snapshot.id}`,
+      kind: 'measurement',
+      kindLabel: 'Measurement',
+      occurredAt: snapshot.recordedAt,
+      title: 'Body stats updated',
+      detail: `Weight ${snapshot.measurements.bodyWeightKg || '-'} kg · Body fat ${snapshot.measurements.bodyFatPercent || '-'}% · Waist ${snapshot.measurements.waistCm || '-'} cm`
+    }));
+
+    const checkInEvents: ClientTimelineEvent[] = timelineClient.checkIns.map((checkIn) => ({
+      id: `checkin-${checkIn.id}`,
+      kind: 'check-in',
+      kindLabel: 'Check-in',
+      occurredAt: checkIn.recordedAt,
+      title: 'Wellness check-in logged',
+      detail: `Sleep ${checkIn.sleepHours || '-'} h · Stress ${checkIn.stress || '-'} · Energy ${checkIn.energy || '-'} · Steps ${checkIn.steps || '-'}`
+    }));
+
+    const bookingEvents: ClientTimelineEvent[] = bookings
+      .filter((booking) => booking.clientId === timelineClient.id)
+      .map((booking) => ({
+        id: `booking-${booking.id}`,
+        kind: 'booking',
+        kindLabel: 'Booking',
+        occurredAt: booking.startAt,
+        title: `${booking.title} (${booking.status})`,
+        detail: `${formatDateTime(booking.startAt)} - ${formatTimeOnly(booking.endAt)}${booking.recurrence === 'weekly' ? ' · Weekly' : ''}`
+      }));
+
+    const sessionEvents: ClientTimelineEvent[] = sessionHistory
+      .filter((record) => record.clientId === timelineClient.id)
+      .map((record) => ({
+        id: `session-${record.id}`,
+        kind: 'session',
+        kindLabel: 'Session',
+        occurredAt: record.finishedAt,
+        title: `${record.programName} saved`,
+        detail: `${record.completedSets} sets · ${record.totalReps} reps · ${Math.round(record.totalLoadKg)} kg load`
+      }));
+
+    return [...sessionEvents, ...bookingEvents, ...measurementEvents, ...checkInEvents]
+      .filter((event) => !Number.isNaN(new Date(event.occurredAt).getTime()))
+      .sort((left, right) => (left.occurredAt > right.occurredAt ? -1 : 1));
+  }, [bookings, sessionHistory, timelineClient]);
 
   const bookableClients = useMemo(
     () => clients.filter((client) => !client.archived),
@@ -1999,6 +2064,20 @@ function App() {
       setClientDraft(selectedClient);
     }
   }, [selectedClient, selectedClientId, isClientModalOpen]);
+
+  useEffect(() => {
+    const activeClientIds = clients.filter((client) => !client.archived).map((client) => client.id);
+    if (!activeClientIds.length) {
+      if (timelineClientId) {
+        setTimelineClientId('');
+      }
+      return;
+    }
+
+    if (!timelineClientId || !activeClientIds.includes(timelineClientId)) {
+      setTimelineClientId(activeClientIds[0]);
+    }
+  }, [clients, timelineClientId]);
 
   useEffect(() => {
     if (isExerciseModalOpen && !selectedExerciseId) {
@@ -4233,6 +4312,40 @@ function App() {
                     ))
                   ) : (
                     <p className="empty-copy">No client check-ins due right now.</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="tools-attention-block clients-timeline-card">
+                <div className="section-heading compact">
+                  <div>
+                    <span className="eyebrow">Client timeline</span>
+                    <h3>Progress and activity feed</h3>
+                  </div>
+                  <span className="pill">{clientTimelineEvents.length} events</span>
+                </div>
+
+                <div className="timeline-controls">
+                  <SelectField
+                    label="Timeline client"
+                    value={timelineClientId}
+                    options={clientOptionValues}
+                    onChange={setTimelineClientId}
+                  />
+                </div>
+
+                <div className="history-list">
+                  {clientTimelineEvents.length ? (
+                    clientTimelineEvents.slice(0, 18).map((event) => (
+                      <article className="history-row" key={event.id}>
+                        <strong>{formatDateTime(event.occurredAt)}</strong>
+                        <span className={`timeline-kind timeline-kind-${event.kind}`}>{event.kindLabel}</span>
+                        <span>{event.title}</span>
+                        <span>{event.detail}</span>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="empty-copy">No timeline activity yet for this client.</p>
                   )}
                 </div>
               </section>
