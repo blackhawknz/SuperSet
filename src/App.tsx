@@ -199,7 +199,10 @@ const STORAGE_KEYS = {
   activeSessionDraft: 'superset.active-session-draft',
   lockHash: 'superset.lock.hash',
   recentlyEdited: 'superset.recently-edited',
-  dueCheckInDismissals: 'superset.due-checkin-dismissals'
+  dueCheckInDismissals: 'superset.due-checkin-dismissals',
+  dashboardExpanded: 'superset.ui.dashboard-expanded',
+  clientsExpanded: 'superset.ui.clients-expanded',
+  programsExpanded: 'superset.ui.programs-expanded'
 };
 
 const MOMENT_QUOTES = [
@@ -887,6 +890,19 @@ function loadCollection<T>(key: string, fallback: T): T {
   }
 }
 
+function loadBooleanSetting(key: string, fallback = false) {
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+
+  const storedValue = window.localStorage.getItem(key);
+  if (storedValue == null) {
+    return fallback;
+  }
+
+  return storedValue === 'true';
+}
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString([], {
     dateStyle: 'medium',
@@ -1486,6 +1502,9 @@ function App() {
   const [isDataDrawerOpen, setIsDataDrawerOpen] = useState(false);
   const [isSecurityDrawerOpen, setIsSecurityDrawerOpen] = useState(false);
   const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
+  const [isDashboardExpanded, setIsDashboardExpanded] = useState(() => loadBooleanSetting(STORAGE_KEYS.dashboardExpanded, false));
+  const [isClientsExpanded, setIsClientsExpanded] = useState(() => loadBooleanSetting(STORAGE_KEYS.clientsExpanded, false));
+  const [isProgramsExpanded, setIsProgramsExpanded] = useState(() => loadBooleanSetting(STORAGE_KEYS.programsExpanded, false));
   const [exportClientId, setExportClientId] = useState('all');
   const [exportStartDate, setExportStartDate] = useState('');
   const [exportEndDate, setExportEndDate] = useState('');
@@ -1535,6 +1554,18 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.dueCheckInDismissals, JSON.stringify(dueCheckInDismissals));
   }, [dueCheckInDismissals]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.dashboardExpanded, String(isDashboardExpanded));
+  }, [isDashboardExpanded]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.clientsExpanded, String(isClientsExpanded));
+  }, [isClientsExpanded]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.programsExpanded, String(isProgramsExpanded));
+  }, [isProgramsExpanded]);
 
   useEffect(() => {
     const nextClientId = clients[0]?.id ?? '';
@@ -4505,159 +4536,187 @@ function App() {
               </div>
             </section>
 
-            <section className="panel card">
-              <div className="section-heading compact">
+            <section className="panel card panel-span-2 dashboard-disclosure-panel">
+              <div className="dashboard-disclosure-row">
                 <div>
-                  <span className="eyebrow">Recent edits</span>
-                  <h2>Jump back in fast</h2>
+                  <span className="eyebrow">Dashboard mode</span>
+                  <h3>{isDashboardExpanded ? 'Full view enabled' : 'Focus view enabled'}</h3>
+                  <p className="section-copy">
+                    {isDashboardExpanded
+                      ? 'Showing all secondary insights, trends, and analytics cards.'
+                      : 'Showing core day-to-day cards only. Expand when you need deeper context.'}
+                  </p>
+                </div>
+                <div className="actions-row">
+                  <button
+                    className="button button-secondary"
+                    onClick={() => setIsDashboardExpanded((current) => !current)}
+                    aria-expanded={isDashboardExpanded}
+                    type="button"
+                  >
+                    {isDashboardExpanded ? 'Collapse secondary cards' : 'Show secondary cards'}
+                  </button>
                 </div>
               </div>
+            </section>
 
-              <div className="recent-edits-controls">
-                <div className="recent-edits-filter-group">
-                  {(['all', 'client', 'program', 'exercise'] as RecentlyEditedFilter[]).map((filterKey) => (
+            {isDashboardExpanded ? (
+              <>
+                <section className="panel card">
+                  <div className="section-heading compact">
+                    <div>
+                      <span className="eyebrow">Recent edits</span>
+                      <h2>Jump back in fast</h2>
+                    </div>
+                  </div>
+
+                  <div className="recent-edits-controls">
+                    <div className="recent-edits-filter-group">
+                      {(['all', 'client', 'program', 'exercise'] as RecentlyEditedFilter[]).map((filterKey) => (
+                        <button
+                          key={filterKey}
+                          className={recentlyEditedFilter === filterKey ? 'button button-secondary compact-button recent-filter-button active' : 'button button-secondary compact-button recent-filter-button'}
+                          onClick={() => setRecentlyEditedFilter(filterKey)}
+                          type="button"
+                        >
+                          {filterKey === 'all' ? 'All' : `${filterKey}s`}
+                        </button>
+                      ))}
+                    </div>
                     <button
-                      key={filterKey}
-                      className={recentlyEditedFilter === filterKey ? 'button button-secondary compact-button recent-filter-button active' : 'button button-secondary compact-button recent-filter-button'}
-                      onClick={() => setRecentlyEditedFilter(filterKey)}
+                      className="button button-secondary compact-button"
+                      onClick={clearRecentlyEdited}
+                      disabled={!recentlyEdited.length}
                       type="button"
                     >
-                      {filterKey === 'all' ? 'All' : `${filterKey}s`}
+                      Clear recent
                     </button>
-                  ))}
-                </div>
-                <button
-                  className="button button-secondary compact-button"
-                  onClick={clearRecentlyEdited}
-                  disabled={!recentlyEdited.length}
-                  type="button"
-                >
-                  Clear recent
-                </button>
-              </div>
+                  </div>
 
-              <div className="record-list">
-                {filteredRecentlyEdited.length ? (
-                  filteredRecentlyEdited.map((item) => (
-                    <button
-                      className="item-row"
-                      key={`${item.entityType}-${item.entityId}`}
-                      onClick={() => openRecentlyEditedItem(item)}
-                      type="button"
-                    >
-                      <div>
-                        <strong>{item.label}</strong>
-                        <p>{item.detail}</p>
+                  <div className="record-list">
+                    {filteredRecentlyEdited.length ? (
+                      filteredRecentlyEdited.map((item) => (
+                        <button
+                          className="item-row"
+                          key={`${item.entityType}-${item.entityId}`}
+                          onClick={() => openRecentlyEditedItem(item)}
+                          type="button"
+                        >
+                          <div>
+                            <strong>{item.label}</strong>
+                            <p>{item.detail}</p>
+                          </div>
+                          <div className="recent-item-meta">
+                            <span className="pill">{item.entityType}</span>
+                            <span className="muted-text">{formatDateTime(item.editedAt)}</span>
+                          </div>
+                        </button>
+                      ))
+                    ) : recentlyEdited.length ? (
+                      <div className="empty-guided">
+                        <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
+                        <div className="actions-row">
+                          <button className="button button-secondary compact-button" onClick={() => setRecentlyEditedFilter('all')} type="button">
+                            Show all edits
+                          </button>
+                        </div>
                       </div>
-                      <div className="recent-item-meta">
-                        <span className="pill">{item.entityType}</span>
-                        <span className="muted-text">{formatDateTime(item.editedAt)}</span>
+                    ) : (
+                      <div className="empty-guided">
+                        <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
+                        <div className="actions-row">
+                          <button className="button button-secondary compact-button" onClick={openQuickClientCreate} type="button">
+                            Create first client
+                          </button>
+                        </div>
                       </div>
-                    </button>
-                  ))
-                ) : recentlyEdited.length ? (
-                  <div className="empty-guided">
-                    <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
-                    <div className="actions-row">
-                      <button className="button button-secondary compact-button" onClick={() => setRecentlyEditedFilter('all')} type="button">
-                        Show all edits
-                      </button>
+                    )}
+                  </div>
+                </section>
+
+                <section className="panel card">
+                  <div className="section-heading compact">
+                    <div>
+                      <span className="eyebrow">Weekly reminders</span>
+                      <h2>Check-ins due</h2>
                     </div>
                   </div>
-                ) : (
-                  <div className="empty-guided">
-                    <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
-                    <div className="actions-row">
-                      <button className="button button-secondary compact-button" onClick={openQuickClientCreate} type="button">
-                        Create first client
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <section className="panel card">
-              <div className="section-heading compact">
-                <div>
-                  <span className="eyebrow">Weekly reminders</span>
-                  <h2>Check-ins due</h2>
-                </div>
-              </div>
-              <div className="record-list">
-                {dueCheckInClients.length ? (
-                  dueCheckInClients.slice(0, 5).map((client) => (
-                    <article className="record-row" key={client.id}>
-                      <div>
-                        <strong>{client.name}</strong>
-                        <p>{client.goal || 'No goal added'}</p>
+                  <div className="record-list">
+                    {dueCheckInClients.length ? (
+                      dueCheckInClients.slice(0, 5).map((client) => (
+                        <article className="record-row" key={client.id}>
+                          <div>
+                            <strong>{client.name}</strong>
+                            <p>{client.goal || 'No goal added'}</p>
+                          </div>
+                          <span className="pill">Due</span>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="empty-guided">
+                        <p className="empty-copy">No clients due this week.</p>
+                        <div className="actions-row">
+                          <button className="button button-secondary compact-button" onClick={() => setView('clients')} type="button">
+                            Review client list
+                          </button>
+                        </div>
                       </div>
-                      <span className="pill">Due</span>
-                    </article>
-                  ))
-                ) : (
-                  <div className="empty-guided">
-                    <p className="empty-copy">No clients due this week.</p>
-                    <div className="actions-row">
-                      <button className="button button-secondary compact-button" onClick={() => setView('clients')} type="button">
-                        Review client list
-                      </button>
+                    )}
+                  </div>
+                </section>
+
+                <section className="panel card panel-span-2">
+                  <div className="section-heading compact">
+                    <div>
+                      <span className="eyebrow">Trends</span>
+                      <h2>Session volume and load (last 6 weeks)</h2>
                     </div>
                   </div>
-                )}
-              </div>
-            </section>
-
-            <section className="panel card panel-span-2">
-              <div className="section-heading compact">
-                <div>
-                  <span className="eyebrow">Trends</span>
-                  <h2>Session volume and load (last 6 weeks)</h2>
-                </div>
-              </div>
-              <div className="trend-list">
-                {sessionTrendRows.length ? (
-                  sessionTrendRows.map((row) => (
-                    <article className="trend-row" key={row.label}>
-                      <strong>{row.label}</strong>
-                      <span>{row.completedSets} sets</span>
-                      <span>{row.totalReps} reps</span>
-                      <span>{Math.round(row.totalLoadKg)} kg load</span>
-                      <div className="trend-bar-track">
-                        <div className="trend-bar-fill" style={{ width: `${Math.max((row.totalLoadKg / maxTrendLoad) * 100, 6)}%` }} />
+                  <div className="trend-list">
+                    {sessionTrendRows.length ? (
+                      sessionTrendRows.map((row) => (
+                        <article className="trend-row" key={row.label}>
+                          <strong>{row.label}</strong>
+                          <span>{row.completedSets} sets</span>
+                          <span>{row.totalReps} reps</span>
+                          <span>{Math.round(row.totalLoadKg)} kg load</span>
+                          <div className="trend-bar-track">
+                            <div className="trend-bar-fill" style={{ width: `${Math.max((row.totalLoadKg / maxTrendLoad) * 100, 6)}%` }} />
+                          </div>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="empty-guided">
+                        <p className="empty-copy">Save sessions with set weight to see load trends.</p>
+                        <div className="actions-row">
+                          <button className="button button-secondary compact-button" onClick={() => setView('session')} type="button">
+                            Run and save a session
+                          </button>
+                        </div>
                       </div>
-                    </article>
-                  ))
-                ) : (
-                  <div className="empty-guided">
-                    <p className="empty-copy">Save sessions with set weight to see load trends.</p>
-                    <div className="actions-row">
-                      <button className="button button-secondary compact-button" onClick={() => setView('session')} type="button">
-                        Run and save a session
-                      </button>
+                    )}
+                  </div>
+                </section>
+
+                <section className="panel card panel-span-2">
+                  <div className="section-heading compact">
+                    <div>
+                      <span className="eyebrow">Analytics</span>
+                      <h2>Coaching metrics at a glance</h2>
                     </div>
                   </div>
-                )}
-              </div>
-            </section>
-
-            <section className="panel card panel-span-2">
-              <div className="section-heading compact">
-                <div>
-                  <span className="eyebrow">Analytics</span>
-                  <h2>Coaching metrics at a glance</h2>
-                </div>
-              </div>
-              <div className="stats-grid">
-                {analyticsCards.map((card) => (
-                  <article className="stat-card" key={card.label}>
-                    <span className="stat-label">{card.label}</span>
-                    <strong>{card.value}</strong>
-                    <span className="stat-note">{card.note}</span>
-                  </article>
-                ))}
-              </div>
-            </section>
+                  <div className="stats-grid">
+                    {analyticsCards.map((card) => (
+                      <article className="stat-card" key={card.label}>
+                        <span className="stat-label">{card.label}</span>
+                        <strong>{card.value}</strong>
+                        <span className="stat-note">{card.note}</span>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </>
+            ) : null}
           </>
         ) : null}
 
@@ -5006,74 +5065,102 @@ function App() {
                 </button>
               </div>
 
-              <section className="tools-attention-block clients-due-card">
-                <div className="section-heading compact">
+              <section className="tools-attention-block focus-disclosure-card">
+                <div className="focus-disclosure-row">
                   <div>
-                    <span className="eyebrow">Client workflow</span>
-                    <h3>Due check-ins</h3>
+                    <span className="eyebrow">Clients mode</span>
+                    <h3>{isClientsExpanded ? 'Full context enabled' : 'Focus view enabled'}</h3>
+                    <p className="section-copy">
+                      {isClientsExpanded
+                        ? 'Showing due check-ins and full timeline context.'
+                        : 'Showing list and filters only. Expand for check-ins and timeline.'}
+                    </p>
                   </div>
-                  <span className="pill">{dueCheckInClients.length} due</span>
-                </div>
-
-                <div className="record-list">
-                  {dueCheckInClients.length ? (
-                    dueCheckInClients.slice(0, 6).map((client) => (
-                      <article className="record-row" key={`due-client-${client.id}`}>
-                        <div>
-                          <strong>{client.name}</strong>
-                          <p>{client.goal || 'No goal added'}</p>
-                        </div>
-                        <div className="session-set-actions">
-                          <span className="pill">Due</span>
-                          <button
-                            className="button button-secondary compact-button"
-                            onClick={() => openClientCheckIn(client)}
-                            type="button"
-                          >
-                            Log check-in now
-                          </button>
-                        </div>
-                      </article>
-                    ))
-                  ) : (
-                    <p className="empty-copy">No client check-ins due right now.</p>
-                  )}
+                  <div className="actions-row">
+                    <button
+                      className="button button-secondary compact-button"
+                      onClick={() => setIsClientsExpanded((current) => !current)}
+                      aria-expanded={isClientsExpanded}
+                      type="button"
+                    >
+                      {isClientsExpanded ? 'Collapse secondary cards' : 'Show secondary cards'}
+                    </button>
+                  </div>
                 </div>
               </section>
 
-              <section className="tools-attention-block clients-timeline-card">
-                <div className="section-heading compact">
-                  <div>
-                    <span className="eyebrow">Client timeline</span>
-                    <h3>Progress and activity feed</h3>
-                  </div>
-                  <span className="pill">{clientTimelineEvents.length} events</span>
-                </div>
+              {isClientsExpanded ? (
+                <>
+                  <section className="tools-attention-block clients-due-card">
+                    <div className="section-heading compact">
+                      <div>
+                        <span className="eyebrow">Client workflow</span>
+                        <h3>Due check-ins</h3>
+                      </div>
+                      <span className="pill">{dueCheckInClients.length} due</span>
+                    </div>
 
-                <div className="timeline-controls">
-                  <SelectField
-                    label="Timeline client"
-                    value={timelineClientId}
-                    options={clientOptionValues}
-                    onChange={setTimelineClientId}
-                  />
-                </div>
+                    <div className="record-list">
+                      {dueCheckInClients.length ? (
+                        dueCheckInClients.slice(0, 6).map((client) => (
+                          <article className="record-row" key={`due-client-${client.id}`}>
+                            <div>
+                              <strong>{client.name}</strong>
+                              <p>{client.goal || 'No goal added'}</p>
+                            </div>
+                            <div className="session-set-actions">
+                              <span className="pill">Due</span>
+                              <button
+                                className="button button-secondary compact-button"
+                                onClick={() => openClientCheckIn(client)}
+                                type="button"
+                              >
+                                Log check-in now
+                              </button>
+                            </div>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="empty-copy">No client check-ins due right now.</p>
+                      )}
+                    </div>
+                  </section>
 
-                <div className="history-list">
-                  {clientTimelineEvents.length ? (
-                    clientTimelineEvents.slice(0, 18).map((event) => (
-                      <article className="history-row" key={event.id}>
-                        <strong>{formatDateTime(event.occurredAt)}</strong>
-                        <span className={`timeline-kind timeline-kind-${event.kind}`}>{event.kindLabel}</span>
-                        <span>{event.title}</span>
-                        <span>{event.detail}</span>
-                      </article>
-                    ))
-                  ) : (
-                    <p className="empty-copy">No timeline activity yet for this client.</p>
-                  )}
-                </div>
-              </section>
+                  <section className="tools-attention-block clients-timeline-card">
+                    <div className="section-heading compact">
+                      <div>
+                        <span className="eyebrow">Client timeline</span>
+                        <h3>Progress and activity feed</h3>
+                      </div>
+                      <span className="pill">{clientTimelineEvents.length} events</span>
+                    </div>
+
+                    <div className="timeline-controls">
+                      <SelectField
+                        label="Timeline client"
+                        value={timelineClientId}
+                        options={clientOptionValues}
+                        onChange={setTimelineClientId}
+                      />
+                    </div>
+
+                    <div className="history-list">
+                      {clientTimelineEvents.length ? (
+                        clientTimelineEvents.slice(0, 18).map((event) => (
+                          <article className="history-row" key={event.id}>
+                            <strong>{formatDateTime(event.occurredAt)}</strong>
+                            <span className={`timeline-kind timeline-kind-${event.kind}`}>{event.kindLabel}</span>
+                            <span>{event.title}</span>
+                            <span>{event.detail}</span>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="empty-copy">No timeline activity yet for this client.</p>
+                      )}
+                    </div>
+                  </section>
+                </>
+              ) : null}
 
               <div className="item-list">
                 {filteredClients.map((client) => (
@@ -5287,6 +5374,30 @@ function App() {
                 </button>
               </div>
 
+              <section className="tools-attention-block focus-disclosure-card">
+                <div className="focus-disclosure-row">
+                  <div>
+                    <span className="eyebrow">Programs mode</span>
+                    <h3>{isProgramsExpanded ? 'Full controls enabled' : 'Focus view enabled'}</h3>
+                    <p className="section-copy">
+                      {isProgramsExpanded
+                        ? 'Showing duplicate controls and detailed action affordances.'
+                        : 'Showing streamlined list rows. Expand when you need advanced actions.'}
+                    </p>
+                  </div>
+                  <div className="actions-row">
+                    <button
+                      className="button button-secondary compact-button"
+                      onClick={() => setIsProgramsExpanded((current) => !current)}
+                      aria-expanded={isProgramsExpanded}
+                      type="button"
+                    >
+                      {isProgramsExpanded ? 'Collapse secondary controls' : 'Show secondary controls'}
+                    </button>
+                  </div>
+                </div>
+              </section>
+
               <div className="item-list">
                 {filteredPrograms.map((program) => {
                   const client = clients.find((entry) => entry.id === program.clientId);
@@ -5302,13 +5413,15 @@ function App() {
                       </button>
                       <div className="program-item-meta">
                         <span className="pill">{program.archived ? 'Archived' : `${program.exercises.length} moves`}</span>
-                        <button
-                          className="button button-secondary compact-button"
-                          onClick={() => duplicateProgram(program.id)}
-                          type="button"
-                        >
-                          Duplicate
-                        </button>
+                        {isProgramsExpanded ? (
+                          <button
+                            className="button button-secondary compact-button"
+                            onClick={() => duplicateProgram(program.id)}
+                            type="button"
+                          >
+                            Duplicate
+                          </button>
+                        ) : null}
                       </div>
                     </article>
                   );
@@ -5817,12 +5930,6 @@ function App() {
       </main>
 
       <div className="mobile-quick-actions">
-        <button className="button button-primary" onClick={openQuickClientCreate} type="button">
-          Add client
-        </button>
-        <button className="button button-secondary" onClick={openSessionView} type="button">
-          Start session
-        </button>
         <button className="button button-secondary" onClick={openCommandPalette} type="button">
           Search
         </button>
