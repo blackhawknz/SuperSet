@@ -539,6 +539,28 @@ select:focus-visible,
   margin: 0;
 }
 
+.focus-disclosure-card {
+  margin-bottom: 16px;
+  background: rgba(2, 6, 23, 0.28);
+}
+
+.focus-disclosure-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.focus-disclosure-row h3 {
+  margin: 6px 0 6px;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.focus-disclosure-row .section-copy {
+  margin: 0;
+}
+
 .recent-edits-filter-group {
   display: flex;
   flex-wrap: wrap;
@@ -1287,7 +1309,8 @@ select:focus-visible,
   .session-set-actions,
   .exercise-editor-header,
   .exercise-block-top,
-  .dashboard-disclosure-row {
+  .dashboard-disclosure-row,
+  .focus-disclosure-row {
     flex-direction: column;
     align-items: start;
   }
@@ -1310,12 +1333,12 @@ select:focus-visible,
 
   .mobile-quick-actions {
     position: fixed;
-    left: 8px;
-    right: 8px;
+    left: 12px;
+    right: 12px;
     bottom: 74px;
     z-index: 41;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     gap: 8px;
   }
 

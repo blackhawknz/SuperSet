@@ -1487,6 +1487,8 @@ function App() {
   const [isSecurityDrawerOpen, setIsSecurityDrawerOpen] = useState(false);
   const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
   const [isDashboardExpanded, setIsDashboardExpanded] = useState(false);
+  const [isClientsExpanded, setIsClientsExpanded] = useState(false);
+  const [isProgramsExpanded, setIsProgramsExpanded] = useState(false);
   const [exportClientId, setExportClientId] = useState('all');
   const [exportStartDate, setExportStartDate] = useState('');
   const [exportEndDate, setExportEndDate] = useState('');
@@ -5035,74 +5037,102 @@ function App() {
                 </button>
               </div>
 
-              <section className="tools-attention-block clients-due-card">
-                <div className="section-heading compact">
+              <section className="tools-attention-block focus-disclosure-card">
+                <div className="focus-disclosure-row">
                   <div>
-                    <span className="eyebrow">Client workflow</span>
-                    <h3>Due check-ins</h3>
+                    <span className="eyebrow">Clients mode</span>
+                    <h3>{isClientsExpanded ? 'Full context enabled' : 'Focus view enabled'}</h3>
+                    <p className="section-copy">
+                      {isClientsExpanded
+                        ? 'Showing due check-ins and full timeline context.'
+                        : 'Showing list and filters only. Expand for check-ins and timeline.'}
+                    </p>
                   </div>
-                  <span className="pill">{dueCheckInClients.length} due</span>
-                </div>
-
-                <div className="record-list">
-                  {dueCheckInClients.length ? (
-                    dueCheckInClients.slice(0, 6).map((client) => (
-                      <article className="record-row" key={`due-client-${client.id}`}>
-                        <div>
-                          <strong>{client.name}</strong>
-                          <p>{client.goal || 'No goal added'}</p>
-                        </div>
-                        <div className="session-set-actions">
-                          <span className="pill">Due</span>
-                          <button
-                            className="button button-secondary compact-button"
-                            onClick={() => openClientCheckIn(client)}
-                            type="button"
-                          >
-                            Log check-in now
-                          </button>
-                        </div>
-                      </article>
-                    ))
-                  ) : (
-                    <p className="empty-copy">No client check-ins due right now.</p>
-                  )}
+                  <div className="actions-row">
+                    <button
+                      className="button button-secondary compact-button"
+                      onClick={() => setIsClientsExpanded((current) => !current)}
+                      aria-expanded={isClientsExpanded}
+                      type="button"
+                    >
+                      {isClientsExpanded ? 'Collapse secondary cards' : 'Show secondary cards'}
+                    </button>
+                  </div>
                 </div>
               </section>
 
-              <section className="tools-attention-block clients-timeline-card">
-                <div className="section-heading compact">
-                  <div>
-                    <span className="eyebrow">Client timeline</span>
-                    <h3>Progress and activity feed</h3>
-                  </div>
-                  <span className="pill">{clientTimelineEvents.length} events</span>
-                </div>
+              {isClientsExpanded ? (
+                <>
+                  <section className="tools-attention-block clients-due-card">
+                    <div className="section-heading compact">
+                      <div>
+                        <span className="eyebrow">Client workflow</span>
+                        <h3>Due check-ins</h3>
+                      </div>
+                      <span className="pill">{dueCheckInClients.length} due</span>
+                    </div>
 
-                <div className="timeline-controls">
-                  <SelectField
-                    label="Timeline client"
-                    value={timelineClientId}
-                    options={clientOptionValues}
-                    onChange={setTimelineClientId}
-                  />
-                </div>
+                    <div className="record-list">
+                      {dueCheckInClients.length ? (
+                        dueCheckInClients.slice(0, 6).map((client) => (
+                          <article className="record-row" key={`due-client-${client.id}`}>
+                            <div>
+                              <strong>{client.name}</strong>
+                              <p>{client.goal || 'No goal added'}</p>
+                            </div>
+                            <div className="session-set-actions">
+                              <span className="pill">Due</span>
+                              <button
+                                className="button button-secondary compact-button"
+                                onClick={() => openClientCheckIn(client)}
+                                type="button"
+                              >
+                                Log check-in now
+                              </button>
+                            </div>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="empty-copy">No client check-ins due right now.</p>
+                      )}
+                    </div>
+                  </section>
 
-                <div className="history-list">
-                  {clientTimelineEvents.length ? (
-                    clientTimelineEvents.slice(0, 18).map((event) => (
-                      <article className="history-row" key={event.id}>
-                        <strong>{formatDateTime(event.occurredAt)}</strong>
-                        <span className={`timeline-kind timeline-kind-${event.kind}`}>{event.kindLabel}</span>
-                        <span>{event.title}</span>
-                        <span>{event.detail}</span>
-                      </article>
-                    ))
-                  ) : (
-                    <p className="empty-copy">No timeline activity yet for this client.</p>
-                  )}
-                </div>
-              </section>
+                  <section className="tools-attention-block clients-timeline-card">
+                    <div className="section-heading compact">
+                      <div>
+                        <span className="eyebrow">Client timeline</span>
+                        <h3>Progress and activity feed</h3>
+                      </div>
+                      <span className="pill">{clientTimelineEvents.length} events</span>
+                    </div>
+
+                    <div className="timeline-controls">
+                      <SelectField
+                        label="Timeline client"
+                        value={timelineClientId}
+                        options={clientOptionValues}
+                        onChange={setTimelineClientId}
+                      />
+                    </div>
+
+                    <div className="history-list">
+                      {clientTimelineEvents.length ? (
+                        clientTimelineEvents.slice(0, 18).map((event) => (
+                          <article className="history-row" key={event.id}>
+                            <strong>{formatDateTime(event.occurredAt)}</strong>
+                            <span className={`timeline-kind timeline-kind-${event.kind}`}>{event.kindLabel}</span>
+                            <span>{event.title}</span>
+                            <span>{event.detail}</span>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="empty-copy">No timeline activity yet for this client.</p>
+                      )}
+                    </div>
+                  </section>
+                </>
+              ) : null}
 
               <div className="item-list">
                 {filteredClients.map((client) => (
@@ -5316,6 +5346,30 @@ function App() {
                 </button>
               </div>
 
+              <section className="tools-attention-block focus-disclosure-card">
+                <div className="focus-disclosure-row">
+                  <div>
+                    <span className="eyebrow">Programs mode</span>
+                    <h3>{isProgramsExpanded ? 'Full controls enabled' : 'Focus view enabled'}</h3>
+                    <p className="section-copy">
+                      {isProgramsExpanded
+                        ? 'Showing duplicate controls and detailed action affordances.'
+                        : 'Showing streamlined list rows. Expand when you need advanced actions.'}
+                    </p>
+                  </div>
+                  <div className="actions-row">
+                    <button
+                      className="button button-secondary compact-button"
+                      onClick={() => setIsProgramsExpanded((current) => !current)}
+                      aria-expanded={isProgramsExpanded}
+                      type="button"
+                    >
+                      {isProgramsExpanded ? 'Collapse secondary controls' : 'Show secondary controls'}
+                    </button>
+                  </div>
+                </div>
+              </section>
+
               <div className="item-list">
                 {filteredPrograms.map((program) => {
                   const client = clients.find((entry) => entry.id === program.clientId);
@@ -5331,13 +5385,15 @@ function App() {
                       </button>
                       <div className="program-item-meta">
                         <span className="pill">{program.archived ? 'Archived' : `${program.exercises.length} moves`}</span>
-                        <button
-                          className="button button-secondary compact-button"
-                          onClick={() => duplicateProgram(program.id)}
-                          type="button"
-                        >
-                          Duplicate
-                        </button>
+                        {isProgramsExpanded ? (
+                          <button
+                            className="button button-secondary compact-button"
+                            onClick={() => duplicateProgram(program.id)}
+                            type="button"
+                          >
+                            Duplicate
+                          </button>
+                        ) : null}
                       </div>
                     </article>
                   );
@@ -5846,12 +5902,6 @@ function App() {
       </main>
 
       <div className="mobile-quick-actions">
-        <button className="button button-primary" onClick={openQuickClientCreate} type="button">
-          Add client
-        </button>
-        <button className="button button-secondary" onClick={openSessionView} type="button">
-          Start session
-        </button>
         <button className="button button-secondary" onClick={openCommandPalette} type="button">
           Search
         </button>
