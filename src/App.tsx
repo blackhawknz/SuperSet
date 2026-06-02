@@ -180,6 +180,14 @@ type CommandPaletteItem = {
   execute: () => void;
 };
 
+type UndoWindow = {
+  id: string;
+  label: string;
+  kind: 'snapshot' | 'bookings';
+  expiresAt: number;
+  bookingsSnapshot?: CalendarBooking[];
+};
+
 type DueCheckInDismissals = Record<string, string>;
 
 const STORAGE_KEYS = {
@@ -1449,6 +1457,7 @@ function App() {
   const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState('');
+  const [undoWindow, setUndoWindow] = useState<UndoWindow | null>(null);
   const [notice, setNotice] = useState('');
   const [momentQuote] = useState(
     () => MOMENT_QUOTES[Math.floor(Math.random() * MOMENT_QUOTES.length)]
@@ -2122,6 +2131,19 @@ function App() {
   }, [isCommandPaletteOpen]);
 
   useEffect(() => {
+    if (!undoWindow) {
+      return;
+    }
+
+    const remainingMs = Math.max(0, undoWindow.expiresAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setUndoWindow((current) => (current?.id === undoWindow.id ? null : current));
+    }, remainingMs);
+
+    return () => window.clearTimeout(timer);
+  }, [undoWindow]);
+
+  useEffect(() => {
     if (isExerciseModalOpen && !selectedExerciseId) {
       // Creating a new exercise — don't replace the blank draft with fallback selection.
       return;
@@ -2384,6 +2406,35 @@ function App() {
 
   function closeCommandPalette() {
     setIsCommandPaletteOpen(false);
+  }
+
+  function openUndoWindow(payload: { label: string; kind: 'snapshot' | 'bookings'; bookingsSnapshot?: CalendarBooking[] }) {
+    setUndoWindow({
+      id: createId('undo-window'),
+      label: payload.label,
+      kind: payload.kind,
+      bookingsSnapshot: payload.bookingsSnapshot,
+      expiresAt: Date.now() + 8000
+    });
+  }
+
+  function applyUndoWindow() {
+    if (!undoWindow) {
+      return;
+    }
+
+    const target = undoWindow;
+    setUndoWindow(null);
+
+    if (target.kind === 'snapshot') {
+      undoLastSnapshot();
+      return;
+    }
+
+    if (target.bookingsSnapshot) {
+      setBookings(target.bookingsSnapshot.map((booking) => ({ ...booking })));
+      flash('Booking change undone.');
+    }
   }
 
   function pushUndoSnapshot(label: string) {
@@ -2838,6 +2889,8 @@ function App() {
   }
 
   function setBookingStatus(bookingId: string, status: CalendarBookingStatus) {
+    const previousBookings = bookings.map((booking) => ({ ...booking }));
+
     setBookings((current) =>
       current.map((booking) =>
         booking.id === bookingId
@@ -2848,6 +2901,18 @@ function App() {
           : booking
       )
     );
+
+    const statusLabel = status === 'cancelled'
+      ? 'Booking cancelled.'
+      : status === 'completed'
+        ? 'Booking marked as completed.'
+        : 'Booking moved back to planned.';
+
+    openUndoWindow({
+      label: `${statusLabel} Undo available for a few seconds.`,
+      kind: 'bookings',
+      bookingsSnapshot: previousBookings
+    });
 
     if (status === 'completed') {
       flash('Booking marked as completed.');
@@ -3197,6 +3262,10 @@ function App() {
     setClientModalBaseline(serializeClientDraft({ ...clientDraft, archived: true }));
     setIsClientModalOpen(false);
     flash('Client archived.');
+    openUndoWindow({
+      label: 'Client archived. Undo available for a few seconds.',
+      kind: 'snapshot'
+    });
   }
 
   function restoreClient(clientId: string) {
@@ -3375,6 +3444,10 @@ function App() {
     setProgramModalBaseline(serializeProgramDraft(archivedDraft));
     setIsProgramModalOpen(false);
     flash('Program archived.');
+    openUndoWindow({
+      label: 'Program archived. Undo available for a few seconds.',
+      kind: 'snapshot'
+    });
   }
 
   function restoreProgram(programId: string) {
@@ -3874,6 +3947,15 @@ function App() {
       </nav>
 
       {notice ? <div className="notice card">{notice}</div> : null}
+
+      {undoWindow ? (
+        <div className="undo-window card" role="status" aria-live="polite">
+          <p>{undoWindow.label}</p>
+          <button className="button button-secondary compact-button" onClick={applyUndoWindow} type="button">
+            Undo
+          </button>
+        </div>
+      ) : null}
 
       {isMobileToolsOpen ? (
         <div className="mobile-sheet-backdrop" role="presentation" onClick={() => setIsMobileToolsOpen(false)}>
