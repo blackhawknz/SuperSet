@@ -2119,6 +2119,49 @@ function App() {
     ];
   }, [bookings, clients, exercises.length, programs, sessionHistory.length, todayBookingCount]);
 
+  const analyticsCards = useMemo(() => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const monthBookings = bookings.filter((booking) => {
+      const stamp = new Date(booking.startAt).getTime();
+      return stamp >= monthStart.getTime() && stamp < nextMonthStart.getTime();
+    });
+
+    const completedMonthBookings = monthBookings.filter((booking) => booking.status === 'completed').length;
+    const cancelledMonthBookings = monthBookings.filter((booking) => booking.status === 'cancelled').length;
+    const resolvedMonthBookings = completedMonthBookings + cancelledMonthBookings;
+    const adherencePercent = resolvedMonthBookings > 0
+      ? Math.round((completedMonthBookings / resolvedMonthBookings) * 100)
+      : 0;
+
+    const sixWeeksMs = 6 * 7 * 24 * 60 * 60 * 1000;
+    const sixWeeksAgo = now.getTime() - sixWeeksMs;
+    const recentSessions = sessionHistory.filter((record) => new Date(record.finishedAt).getTime() >= sixWeeksAgo);
+    const totalRecentLoad = recentSessions.reduce((sum, record) => sum + record.totalLoadKg, 0);
+    const averageWeeklyLoad = totalRecentLoad / 6;
+    const averageWeeklySessions = recentSessions.length / 6;
+
+    return [
+      {
+        label: 'Adherence This Month',
+        value: `${adherencePercent}%`,
+        note: `${completedMonthBookings} completed | ${cancelledMonthBookings} cancelled`
+      },
+      {
+        label: 'Missed Bookings This Month',
+        value: String(cancelledMonthBookings),
+        note: `${monthBookings.length} total bookings in month`
+      },
+      {
+        label: 'Average Weekly Load (6w)',
+        value: `${Math.round(averageWeeklyLoad)} kg`,
+        note: `${averageWeeklySessions.toFixed(1)} sessions/week average`
+      }
+    ];
+  }, [bookings, sessionHistory]);
+
   function flash(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 2200);
@@ -3938,6 +3981,24 @@ function App() {
                 ) : (
                   <p className="empty-copy">Save sessions with set weight to see load trends.</p>
                 )}
+              </div>
+            </section>
+
+            <section className="panel card panel-span-2">
+              <div className="section-heading compact">
+                <div>
+                  <span className="eyebrow">Analytics</span>
+                  <h2>Coaching metrics at a glance</h2>
+                </div>
+              </div>
+              <div className="stats-grid">
+                {analyticsCards.map((card) => (
+                  <article className="stat-card" key={card.label}>
+                    <span className="stat-label">{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <span className="stat-note">{card.note}</span>
+                  </article>
+                ))}
               </div>
             </section>
           </>
