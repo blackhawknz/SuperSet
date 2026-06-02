@@ -336,6 +336,20 @@ button {
   font-size: 0.92rem;
 }
 
+.empty-guided {
+  border-radius: 14px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  padding: 12px;
+}
+
+.empty-guided .empty-copy {
+  margin: 0;
+}
+
+.empty-guided .actions-row {
+  margin-top: 10px;
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -4196,7 +4196,14 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">No upcoming sessions scheduled yet.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No upcoming sessions scheduled yet.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setView('calendar')} type="button">
+                        Schedule first booking
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -4230,7 +4237,14 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">No sessions saved yet. Your first run will appear here.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No sessions saved yet. Your first run will appear here.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setView('session')} type="button">
+                        Start first session
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
@@ -4286,9 +4300,23 @@ function App() {
                     </button>
                   ))
                 ) : recentlyEdited.length ? (
-                  <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setRecentlyEditedFilter('all')} type="button">
+                        Show all edits
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={openQuickClientCreate} type="button">
+                        Create first client
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
@@ -4312,7 +4340,14 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">No clients due this week.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No clients due this week.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setView('clients')} type="button">
+                        Review client list
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
@@ -4338,7 +4373,14 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">Save sessions with set weight to see load trends.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">Save sessions with set weight to see load trends.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={() => setView('session')} type="button">
+                        Run and save a session
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
@@ -4502,7 +4544,14 @@ function App() {
                     </article>
                   ))
                 ) : (
-                  <p className="empty-copy">No upcoming sessions scheduled yet.</p>
+                  <div className="empty-guided">
+                    <p className="empty-copy">No upcoming sessions scheduled yet.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={openBookingModalForCreate} disabled={!clientOptionValues.length} type="button">
+                        Create booking
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
@@ -4785,7 +4834,19 @@ function App() {
                     <span className="pill">{client.archived ? 'Archived' : client.status}</span>
                   </button>
                 ))}
-                {filteredClients.length === 0 ? <p className="empty-copy">No clients match this filter.</p> : null}
+                {filteredClients.length === 0 ? (
+                  <div className="empty-guided">
+                    <p className="empty-copy">No clients match this filter.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={clearClientFilters} type="button">
+                        Clear filters
+                      </button>
+                      <button className="button button-secondary compact-button" onClick={openNewClientModal} type="button">
+                        Add client
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
 
@@ -4996,7 +5057,19 @@ function App() {
                     </article>
                   );
                 })}
-                {filteredPrograms.length === 0 ? <p className="empty-copy">No programs match this filter.</p> : null}
+                {filteredPrograms.length === 0 ? (
+                  <div className="empty-guided">
+                    <p className="empty-copy">No programs match this filter.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={clearProgramFilters} type="button">
+                        Clear filters
+                      </button>
+                      <button className="button button-secondary compact-button" onClick={openNewProgramModal} type="button">
+                        Add program
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
 
@@ -5346,6 +5419,11 @@ function App() {
                 <div className="empty-state">
                   <h3>No active session yet</h3>
                   <p>Choose a client and program above to generate the live workout view.</p>
+                  <div className="actions-row">
+                    <button className="button button-secondary" onClick={startSession} type="button">
+                      Start selected session
+                    </button>
+                  </div>
                 </div>
               )}
             </section>
@@ -5399,7 +5477,19 @@ function App() {
                     <span className="pill">{exercise.equipment}</span>
                   </button>
                 ))}
-                {filteredExercises.length === 0 ? <p className="empty-copy">No exercises match this filter.</p> : null}
+                {filteredExercises.length === 0 ? (
+                  <div className="empty-guided">
+                    <p className="empty-copy">No exercises match this filter.</p>
+                    <div className="actions-row">
+                      <button className="button button-secondary compact-button" onClick={clearExerciseFilters} type="button">
+                        Clear search
+                      </button>
+                      <button className="button button-secondary compact-button" onClick={openNewExerciseModal} type="button">
+                        Add exercise
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
 
