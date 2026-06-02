@@ -42,6 +42,21 @@ button {
   cursor: pointer;
 }
 
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+.tab:focus-visible,
+.mobile-tab:focus-visible,
+.item-row:focus-visible,
+.chip-button:focus-visible,
+.week-booking-block:focus-visible,
+.text-button:focus-visible {
+  outline: 3px solid rgba(251, 146, 60, 0.95);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(2, 6, 23, 0.85);
+}
+
 #root {
   min-height: 100vh;
 }
@@ -673,11 +688,11 @@ button {
   background: rgba(249, 115, 22, 0.18);
   color: #f8fafc;
   text-align: left;
-  padding: 4px 5px;
+  padding: 6px;
   display: grid;
   align-content: start;
   gap: 1px;
-  min-height: 22px;
+  min-height: 32px;
 }
 
 .week-booking-block span {
@@ -791,8 +806,8 @@ button {
 }
 
 .toggle-row input {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
 }
 
 .filter-summary-row {
@@ -916,7 +931,7 @@ button {
 }
 
 .compact-button {
-  min-height: 40px;
+  min-height: 44px;
   border-radius: 12px;
   padding: 0 12px;
   font-size: 0.88rem;
@@ -959,7 +974,7 @@ button {
   background: rgba(148, 163, 184, 0.12);
   color: #e2e8f0;
   border-radius: 10px;
-  min-height: 32px;
+  min-height: 36px;
   padding: 0 9px;
   font-size: 0.78rem;
   font-weight: 600;
@@ -1272,7 +1287,7 @@ button {
   }
 
   .mobile-quick-actions .button {
-    min-height: 40px;
+    min-height: 44px;
     border-radius: 12px;
     font-size: 0.82rem;
     padding: 0 10px;
@@ -1330,7 +1345,7 @@ button {
   .mobile-tab {
     border: 1px solid transparent;
     border-radius: 12px;
-    min-height: 40px;
+    min-height: 44px;
     padding: 0 4px;
     background: transparent;
     color: var(--muted);
@@ -1374,6 +1389,24 @@ button {
     color: #fff;
     background: linear-gradient(135deg, #f97316, #fb7185);
     box-shadow: 0 4px 12px rgba(249, 115, 22, 0.45);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+
+    .button:hover,
+    .tab:hover,
+    .item-row:hover,
+    .text-button:hover {
+      transform: none;
+    }
   }
 
   .tab-bar {

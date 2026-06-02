@@ -4057,7 +4057,7 @@ function App() {
 
         <div className="hero-actions">
           <div className="action-drawer card">
-            <button className="button button-secondary drawer-toggle" onClick={() => setIsDataDrawerOpen((current) => !current)} type="button">
+            <button className="button button-secondary drawer-toggle" onClick={() => setIsDataDrawerOpen((current) => !current)} aria-expanded={isDataDrawerOpen} type="button">
               {isDataDrawerOpen ? 'Hide data tools' : 'Show data tools'}
             </button>
             {isDataDrawerOpen ? (
@@ -4122,7 +4122,7 @@ function App() {
           </div>
 
           <div className="action-drawer card">
-            <button className="button button-secondary drawer-toggle" onClick={() => setIsSecurityDrawerOpen((current) => !current)} type="button">
+            <button className="button button-secondary drawer-toggle" onClick={() => setIsSecurityDrawerOpen((current) => !current)} aria-expanded={isSecurityDrawerOpen} type="button">
               {isSecurityDrawerOpen ? 'Hide security' : 'Show security'}
             </button>
             {isSecurityDrawerOpen ? (
@@ -4147,6 +4147,7 @@ function App() {
             className={view === item.key ? 'tab active' : 'tab'}
             onClick={() => setView(item.key)}
             aria-label={item.label}
+            aria-current={view === item.key ? 'page' : undefined}
             title={item.label}
             type="button"
           >
@@ -4157,7 +4158,11 @@ function App() {
         ))}
       </nav>
 
-      {notice ? <div className="notice card">{notice}</div> : null}
+      {notice ? (
+        <div className="notice card" role="status" aria-live="polite">
+          {notice}
+        </div>
+      ) : null}
 
       {undoWindow ? (
         <div className="undo-window card" role="status" aria-live="polite">
@@ -5833,6 +5838,7 @@ function App() {
               setIsMobileToolsOpen(false);
             }}
             aria-label={item.mobileLabel}
+            aria-current={view === item.key ? 'page' : undefined}
             title={item.mobileLabel}
             type="button"
           >
@@ -5844,6 +5850,8 @@ function App() {
           className={hasToolsAttention ? `${isMobileToolsOpen ? 'mobile-tab active' : 'mobile-tab'} attention` : isMobileToolsOpen ? 'mobile-tab active' : 'mobile-tab'}
           onClick={() => setIsMobileToolsOpen((current) => !current)}
           aria-label={hasToolsAttention ? `Tools with ${toolsBadgeLabel} pending items` : 'Tools'}
+          aria-expanded={isMobileToolsOpen}
+          aria-current={isMobileToolsOpen ? 'page' : undefined}
           title="Tools"
           type="button"
         >
