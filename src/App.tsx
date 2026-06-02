@@ -1117,6 +1117,33 @@ function formatTimer(seconds: number) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+function isIsoWithinDateRange(isoValue: string, startDateInput?: string, endDateInput?: string) {
+  const valueMs = new Date(isoValue).getTime();
+  if (Number.isNaN(valueMs)) {
+    return false;
+  }
+
+  if (startDateInput) {
+    const startMs = new Date(`${startDateInput}T00:00:00`).getTime();
+    if (!Number.isNaN(startMs) && valueMs < startMs) {
+      return false;
+    }
+  }
+
+  if (endDateInput) {
+    const endMs = new Date(`${endDateInput}T23:59:59.999`).getTime();
+    if (!Number.isNaN(endMs) && valueMs > endMs) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function toFileLabel(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'all';
+}
+
 function blankCheckIn(): CheckInRecord {
   return {
     id: createId('ci'),
@@ -1174,7 +1201,7 @@ function buildClientUpdateText(client: Client, program: Program, exercises: Exer
   ].join('\n');
 }
 
-function buildClientProgressCsv(clients: Client[]) {
+function buildClientProgressCsv(clients: Client[], startDateInput = '', endDateInput = '') {
   const rows: string[] = [];
   rows.push([
     'clientName',
@@ -1192,7 +1219,9 @@ function buildClientProgressCsv(clients: Client[]) {
   ].join(','));
 
   clients.forEach((client) => {
-    client.measurementHistory.forEach((snapshot) => {
+    client.measurementHistory
+      .filter((snapshot) => isIsoWithinDateRange(snapshot.recordedAt, startDateInput, endDateInput))
+      .forEach((snapshot) => {
       rows.push([
         csvEscape(client.name),
         'measurement',
@@ -1209,7 +1238,9 @@ function buildClientProgressCsv(clients: Client[]) {
       ].join(','));
     });
 
-    client.checkIns.forEach((checkIn) => {
+    client.checkIns
+      .filter((checkIn) => isIsoWithinDateRange(checkIn.recordedAt, startDateInput, endDateInput))
+      .forEach((checkIn) => {
       rows.push([
         csvEscape(client.name),
         'check-in',
@@ -1455,6 +1486,9 @@ function App() {
   const [isDataDrawerOpen, setIsDataDrawerOpen] = useState(false);
   const [isSecurityDrawerOpen, setIsSecurityDrawerOpen] = useState(false);
   const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
+  const [exportClientId, setExportClientId] = useState('all');
+  const [exportStartDate, setExportStartDate] = useState('');
+  const [exportEndDate, setExportEndDate] = useState('');
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState('');
   const [undoWindow, setUndoWindow] = useState<UndoWindow | null>(null);
@@ -1726,6 +1760,14 @@ function App() {
   const clientOptionValues = useMemo(
     () => bookableClients.map((client) => ({ value: client.id, label: client.name })),
     [bookableClients]
+  );
+
+  const exportClientOptions = useMemo(
+    () => [
+      { value: 'all', label: 'All clients' },
+      ...clients.map((client) => ({ value: client.id, label: client.name }))
+    ],
+    [clients]
   );
 
   const upcomingBookings = useMemo(() => {
@@ -2656,6 +2698,135 @@ function App() {
     anchor.click();
     URL.revokeObjectURL(link);
     flash('Client progress CSV exported.');
+  }
+
+  function exportScopedData() {
+    const scopedClients = exportClientId === 'all'
+      ? clients
+      : clients.filter((client) => client.id === exportClientId);
+
+    if (!scopedClients.length) {
+      flash('Select a valid client for scoped export.');
+      return;
+    }
+
+    const scopedClientIds = new Set(scopedClients.map((client) => client.id));
+    const scopedPrograms = programs.filter((program) => scopedClientIds.has(program.clientId));
+    const scopedSessions = sessionHistory.filter(
+      (record) => scopedClientIds.has(record.clientId) && isIsoWithinDateRange(record.finishedAt, exportStartDate, exportEndDate)
+    );
+    const scopedBookings = bookings.filter(
+      (booking) => scopedClientIds.has(booking.clientId) && isIsoWithinDateRange(booking.startAt, exportStartDate, exportEndDate)
+    );
+
+    const scopedExerciseIds = new Set(scopedPrograms.flatMap((program) => program.exercises.map((exercise) => exercise.exerciseId)));
+    const scopedExercises = exportClientId === 'all'
+      ? exercises
+      : exercises.filter((exercise) => scopedExerciseIds.has(exercise.id));
+
+    const payload = JSON.stringify(
+      {
+        version: 1,
+        clients: scopedClients,
+        exercises: scopedExercises,
+        programs: scopedPrograms,
+        sessions: scopedSessions,
+        bookings: scopedBookings
+      },
+      null,
+      2
+    );
+
+    const clientLabel = exportClientId === 'all'
+      ? 'all-clients'
+      : toFileLabel(scopedClients[0]?.name ?? 'client');
+    const dateLabel = exportStartDate || exportEndDate
+      ? `${exportStartDate || 'start'}-to-${exportEndDate || 'end'}`
+      : 'all-time';
+
+    const blob = new Blob([payload], { type: 'application/json' });
+    const link = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = link;
+    anchor.download = `superset-backup-${clientLabel}-${dateLabel}.json`;
+    anchor.click();
+    URL.revokeObjectURL(link);
+    flash(`Scoped backup exported (${scopedClients.length} clients, ${scopedSessions.length} sessions).`);
+  }
+
+  function exportScopedProgressCsv() {
+    const scopedClients = exportClientId === 'all'
+      ? clients
+      : clients.filter((client) => client.id === exportClientId);
+
+    if (!scopedClients.length) {
+      flash('Select a valid client for scoped progress export.');
+      return;
+    }
+
+    const progressRows = scopedClients.reduce((count, client) => {
+      const measurementsCount = client.measurementHistory.filter((snapshot) =>
+        isIsoWithinDateRange(snapshot.recordedAt, exportStartDate, exportEndDate)
+      ).length;
+      const checkInsCount = client.checkIns.filter((entry) =>
+        isIsoWithinDateRange(entry.recordedAt, exportStartDate, exportEndDate)
+      ).length;
+      return count + measurementsCount + checkInsCount;
+    }, 0);
+
+    if (!progressRows) {
+      flash('No progress entries match this export scope.');
+      return;
+    }
+
+    const payload = buildClientProgressCsv(scopedClients, exportStartDate, exportEndDate);
+    const clientLabel = exportClientId === 'all'
+      ? 'all-clients'
+      : toFileLabel(scopedClients[0]?.name ?? 'client');
+    const dateLabel = exportStartDate || exportEndDate
+      ? `${exportStartDate || 'start'}-to-${exportEndDate || 'end'}`
+      : 'all-time';
+
+    const blob = new Blob([payload], { type: 'text/csv;charset=utf-8' });
+    const link = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = link;
+    anchor.download = `superset-client-progress-${clientLabel}-${dateLabel}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(link);
+    flash(`Scoped progress CSV exported (${progressRows} rows).`);
+  }
+
+  function exportScopedCalendarIcs() {
+    const scopedClientIds = new Set(
+      exportClientId === 'all'
+        ? clients.map((client) => client.id)
+        : clients.filter((client) => client.id === exportClientId).map((client) => client.id)
+    );
+
+    if (!scopedClientIds.size) {
+      flash('Select a valid client for scoped calendar export.');
+      return;
+    }
+
+    const exportable = bookings
+      .filter((booking) => booking.status !== 'cancelled')
+      .filter((booking) => scopedClientIds.has(booking.clientId))
+      .filter((booking) => isIsoWithinDateRange(booking.startAt, exportStartDate, exportEndDate));
+
+    if (!exportable.length) {
+      flash('No bookings match this calendar export scope.');
+      return;
+    }
+
+    const client = clients.find((entry) => entry.id === exportClientId) ?? null;
+    const clientLabel = client ? toFileLabel(client.name) : 'all-clients';
+    const dateLabel = exportStartDate || exportEndDate
+      ? `${exportStartDate || 'start'}-to-${exportEndDate || 'end'}`
+      : 'all-time';
+    const fileName = `superset-calendar-${clientLabel}-${dateLabel}.ics`;
+    const calendarName = client ? `${client.name} Sessions` : 'Superset Bookings';
+    downloadCalendarFile(fileName, calendarName, exportable);
   }
 
   async function copyClientUpdate(program: Program) {
@@ -3900,6 +4071,46 @@ function App() {
                 <button className="button button-secondary" onClick={exportProgressCsv} type="button">
                   Export progress CSV
                 </button>
+                <section className="tools-attention-block export-tools-block" aria-label="Targeted export controls">
+                  <p className="tools-attention-title">Targeted export scope</p>
+                  <SelectField
+                    label="Client"
+                    value={exportClientId}
+                    options={exportClientOptions}
+                    onChange={setExportClientId}
+                  />
+                  <div className="form-grid two-up export-date-grid">
+                    <label className="field">
+                      <span>Start date</span>
+                      <input
+                        className="field-input"
+                        type="date"
+                        value={exportStartDate}
+                        onChange={(event) => setExportStartDate(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>End date</span>
+                      <input
+                        className="field-input"
+                        type="date"
+                        value={exportEndDate}
+                        onChange={(event) => setExportEndDate(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="actions-row">
+                    <button className="button button-secondary compact-button" onClick={exportScopedData} type="button">
+                      Export scoped backup
+                    </button>
+                    <button className="button button-secondary compact-button" onClick={exportScopedProgressCsv} type="button">
+                      Export scoped CSV
+                    </button>
+                    <button className="button button-secondary compact-button" onClick={exportScopedCalendarIcs} type="button">
+                      Export scoped calendar
+                    </button>
+                  </div>
+                </section>
                 <button className="button button-secondary" onClick={undoLastSnapshot} disabled={!undoSnapshots.length} type="button">
                   Undo archive action
                 </button>
@@ -4027,6 +4238,46 @@ function App() {
               <button className="button button-secondary" onClick={() => { exportProgressCsv(); setIsMobileToolsOpen(false); }} type="button">
                 Export progress CSV
               </button>
+              <section className="tools-attention-block export-tools-block" aria-label="Targeted export controls">
+                <p className="tools-attention-title">Targeted export scope</p>
+                <SelectField
+                  label="Client"
+                  value={exportClientId}
+                  options={exportClientOptions}
+                  onChange={setExportClientId}
+                />
+                <div className="form-grid two-up export-date-grid">
+                  <label className="field">
+                    <span>Start date</span>
+                    <input
+                      className="field-input"
+                      type="date"
+                      value={exportStartDate}
+                      onChange={(event) => setExportStartDate(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>End date</span>
+                    <input
+                      className="field-input"
+                      type="date"
+                      value={exportEndDate}
+                      onChange={(event) => setExportEndDate(event.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="actions-row">
+                  <button className="button button-secondary compact-button" onClick={() => { exportScopedData(); setIsMobileToolsOpen(false); }} type="button">
+                    Export scoped backup
+                  </button>
+                  <button className="button button-secondary compact-button" onClick={() => { exportScopedProgressCsv(); setIsMobileToolsOpen(false); }} type="button">
+                    Export scoped CSV
+                  </button>
+                  <button className="button button-secondary compact-button" onClick={() => { exportScopedCalendarIcs(); setIsMobileToolsOpen(false); }} type="button">
+                    Export scoped calendar
+                  </button>
+                </div>
+              </section>
               <button className="button button-secondary" onClick={() => { undoLastSnapshot(); setIsMobileToolsOpen(false); }} disabled={!hasUndoPending} type="button">
                 Undo archive action
               </button>

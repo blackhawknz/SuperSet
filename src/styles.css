@@ -208,6 +208,23 @@ button {
   margin-bottom: 8px;
 }
 
+.export-tools-block {
+  margin: 4px 0;
+}
+
+.export-date-grid {
+  margin: 8px 0 2px;
+}
+
+.export-tools-block .actions-row {
+  margin-top: 10px;
+}
+
+.export-tools-block .actions-row .button {
+  min-height: 40px;
+  padding: 0 12px;
+}
+
 .button {
   border: 0;
   border-radius: 16px;
@@ -1283,6 +1300,15 @@ button {
   .mobile-tools-sheet .drawer-content .button {
     min-height: 42px;
     font-size: 0.9rem;
+  }
+
+  .export-tools-block .actions-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .export-tools-block .actions-row .button {
+    width: 100%;
   }
 
   .mobile-nav {
