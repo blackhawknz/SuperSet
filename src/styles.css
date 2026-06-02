@@ -413,6 +413,17 @@ button {
   border-color: rgba(249, 115, 22, 0.35);
 }
 
+.item-row .text-button {
+  flex: 1;
+  text-align: left;
+}
+
+.program-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .recent-item-meta {
   display: grid;
   justify-items: end;

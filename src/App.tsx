@@ -880,6 +880,10 @@ function formatTimeOnly(value: string) {
   });
 }
 
+function formatProgramCopyDateTag(value: Date) {
+  return value.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
 function formatLocalDateKey(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -2973,10 +2977,12 @@ function App() {
       return;
     }
 
+    const copyDateTag = formatProgramCopyDateTag(new Date());
+
     const copy: Program = {
       ...source,
       id: createId('program'),
-      title: `${source.title} Copy`,
+      title: `${source.title} (${copyDateTag})`,
       archived: false,
       exercises: source.exercises.map((exercise) => ({ ...exercise, id: createId('prog-ex') }))
     };
@@ -2995,7 +3001,7 @@ function App() {
     setProgramDraft(copy);
     setProgramModalBaseline(serializeProgramDraft(copy));
     setIsProgramModalOpen(true);
-    flash('Program duplicated.');
+    flash(`Program duplicated as ${copy.title}.`);
   }
 
   function openProgramEditor(program: Program) {
@@ -4345,18 +4351,26 @@ function App() {
                 {filteredPrograms.map((program) => {
                   const client = clients.find((entry) => entry.id === program.clientId);
                   return (
-                    <button
-                      key={program.id}
-                      className={selectedProgramId === program.id ? 'item-row active' : 'item-row'}
-                      onClick={() => openProgramEditor(program)}
-                      type="button"
-                    >
-                      <div>
+                    <article key={program.id} className={selectedProgramId === program.id ? 'item-row active' : 'item-row'}>
+                      <button
+                        className="text-button"
+                        onClick={() => openProgramEditor(program)}
+                        type="button"
+                      >
                         <strong>{program.title}</strong>
                         <p>{client?.name ?? 'Unassigned client'}</p>
+                      </button>
+                      <div className="program-item-meta">
+                        <span className="pill">{program.archived ? 'Archived' : `${program.exercises.length} moves`}</span>
+                        <button
+                          className="button button-secondary compact-button"
+                          onClick={() => duplicateProgram(program.id)}
+                          type="button"
+                        >
+                          Duplicate
+                        </button>
                       </div>
-                      <span className="pill">{program.archived ? 'Archived' : `${program.exercises.length} moves`}</span>
-                    </button>
+                    </article>
                   );
                 })}
                 {filteredPrograms.length === 0 ? <p className="empty-copy">No programs match this filter.</p> : null}
