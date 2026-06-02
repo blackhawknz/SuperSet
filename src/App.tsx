@@ -1486,6 +1486,7 @@ function App() {
   const [isDataDrawerOpen, setIsDataDrawerOpen] = useState(false);
   const [isSecurityDrawerOpen, setIsSecurityDrawerOpen] = useState(false);
   const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
+  const [isDashboardExpanded, setIsDashboardExpanded] = useState(false);
   const [exportClientId, setExportClientId] = useState('all');
   const [exportStartDate, setExportStartDate] = useState('');
   const [exportEndDate, setExportEndDate] = useState('');
@@ -4505,159 +4506,187 @@ function App() {
               </div>
             </section>
 
-            <section className="panel card">
-              <div className="section-heading compact">
+            <section className="panel card panel-span-2 dashboard-disclosure-panel">
+              <div className="dashboard-disclosure-row">
                 <div>
-                  <span className="eyebrow">Recent edits</span>
-                  <h2>Jump back in fast</h2>
+                  <span className="eyebrow">Dashboard mode</span>
+                  <h3>{isDashboardExpanded ? 'Full view enabled' : 'Focus view enabled'}</h3>
+                  <p className="section-copy">
+                    {isDashboardExpanded
+                      ? 'Showing all secondary insights, trends, and analytics cards.'
+                      : 'Showing core day-to-day cards only. Expand when you need deeper context.'}
+                  </p>
+                </div>
+                <div className="actions-row">
+                  <button
+                    className="button button-secondary"
+                    onClick={() => setIsDashboardExpanded((current) => !current)}
+                    aria-expanded={isDashboardExpanded}
+                    type="button"
+                  >
+                    {isDashboardExpanded ? 'Collapse secondary cards' : 'Show secondary cards'}
+                  </button>
                 </div>
               </div>
+            </section>
 
-              <div className="recent-edits-controls">
-                <div className="recent-edits-filter-group">
-                  {(['all', 'client', 'program', 'exercise'] as RecentlyEditedFilter[]).map((filterKey) => (
+            {isDashboardExpanded ? (
+              <>
+                <section className="panel card">
+                  <div className="section-heading compact">
+                    <div>
+                      <span className="eyebrow">Recent edits</span>
+                      <h2>Jump back in fast</h2>
+                    </div>
+                  </div>
+
+                  <div className="recent-edits-controls">
+                    <div className="recent-edits-filter-group">
+                      {(['all', 'client', 'program', 'exercise'] as RecentlyEditedFilter[]).map((filterKey) => (
+                        <button
+                          key={filterKey}
+                          className={recentlyEditedFilter === filterKey ? 'button button-secondary compact-button recent-filter-button active' : 'button button-secondary compact-button recent-filter-button'}
+                          onClick={() => setRecentlyEditedFilter(filterKey)}
+                          type="button"
+                        >
+                          {filterKey === 'all' ? 'All' : `${filterKey}s`}
+                        </button>
+                      ))}
+                    </div>
                     <button
-                      key={filterKey}
-                      className={recentlyEditedFilter === filterKey ? 'button button-secondary compact-button recent-filter-button active' : 'button button-secondary compact-button recent-filter-button'}
-                      onClick={() => setRecentlyEditedFilter(filterKey)}
+                      className="button button-secondary compact-button"
+                      onClick={clearRecentlyEdited}
+                      disabled={!recentlyEdited.length}
                       type="button"
                     >
-                      {filterKey === 'all' ? 'All' : `${filterKey}s`}
+                      Clear recent
                     </button>
-                  ))}
-                </div>
-                <button
-                  className="button button-secondary compact-button"
-                  onClick={clearRecentlyEdited}
-                  disabled={!recentlyEdited.length}
-                  type="button"
-                >
-                  Clear recent
-                </button>
-              </div>
+                  </div>
 
-              <div className="record-list">
-                {filteredRecentlyEdited.length ? (
-                  filteredRecentlyEdited.map((item) => (
-                    <button
-                      className="item-row"
-                      key={`${item.entityType}-${item.entityId}`}
-                      onClick={() => openRecentlyEditedItem(item)}
-                      type="button"
-                    >
-                      <div>
-                        <strong>{item.label}</strong>
-                        <p>{item.detail}</p>
+                  <div className="record-list">
+                    {filteredRecentlyEdited.length ? (
+                      filteredRecentlyEdited.map((item) => (
+                        <button
+                          className="item-row"
+                          key={`${item.entityType}-${item.entityId}`}
+                          onClick={() => openRecentlyEditedItem(item)}
+                          type="button"
+                        >
+                          <div>
+                            <strong>{item.label}</strong>
+                            <p>{item.detail}</p>
+                          </div>
+                          <div className="recent-item-meta">
+                            <span className="pill">{item.entityType}</span>
+                            <span className="muted-text">{formatDateTime(item.editedAt)}</span>
+                          </div>
+                        </button>
+                      ))
+                    ) : recentlyEdited.length ? (
+                      <div className="empty-guided">
+                        <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
+                        <div className="actions-row">
+                          <button className="button button-secondary compact-button" onClick={() => setRecentlyEditedFilter('all')} type="button">
+                            Show all edits
+                          </button>
+                        </div>
                       </div>
-                      <div className="recent-item-meta">
-                        <span className="pill">{item.entityType}</span>
-                        <span className="muted-text">{formatDateTime(item.editedAt)}</span>
+                    ) : (
+                      <div className="empty-guided">
+                        <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
+                        <div className="actions-row">
+                          <button className="button button-secondary compact-button" onClick={openQuickClientCreate} type="button">
+                            Create first client
+                          </button>
+                        </div>
                       </div>
-                    </button>
-                  ))
-                ) : recentlyEdited.length ? (
-                  <div className="empty-guided">
-                    <p className="empty-copy">No {recentlyEditedFilter === 'all' ? '' : `${recentlyEditedFilter} `}items in this filter.</p>
-                    <div className="actions-row">
-                      <button className="button button-secondary compact-button" onClick={() => setRecentlyEditedFilter('all')} type="button">
-                        Show all edits
-                      </button>
+                    )}
+                  </div>
+                </section>
+
+                <section className="panel card">
+                  <div className="section-heading compact">
+                    <div>
+                      <span className="eyebrow">Weekly reminders</span>
+                      <h2>Check-ins due</h2>
                     </div>
                   </div>
-                ) : (
-                  <div className="empty-guided">
-                    <p className="empty-copy">Save a client, program, or exercise to pin it here for quick reopen.</p>
-                    <div className="actions-row">
-                      <button className="button button-secondary compact-button" onClick={openQuickClientCreate} type="button">
-                        Create first client
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <section className="panel card">
-              <div className="section-heading compact">
-                <div>
-                  <span className="eyebrow">Weekly reminders</span>
-                  <h2>Check-ins due</h2>
-                </div>
-              </div>
-              <div className="record-list">
-                {dueCheckInClients.length ? (
-                  dueCheckInClients.slice(0, 5).map((client) => (
-                    <article className="record-row" key={client.id}>
-                      <div>
-                        <strong>{client.name}</strong>
-                        <p>{client.goal || 'No goal added'}</p>
+                  <div className="record-list">
+                    {dueCheckInClients.length ? (
+                      dueCheckInClients.slice(0, 5).map((client) => (
+                        <article className="record-row" key={client.id}>
+                          <div>
+                            <strong>{client.name}</strong>
+                            <p>{client.goal || 'No goal added'}</p>
+                          </div>
+                          <span className="pill">Due</span>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="empty-guided">
+                        <p className="empty-copy">No clients due this week.</p>
+                        <div className="actions-row">
+                          <button className="button button-secondary compact-button" onClick={() => setView('clients')} type="button">
+                            Review client list
+                          </button>
+                        </div>
                       </div>
-                      <span className="pill">Due</span>
-                    </article>
-                  ))
-                ) : (
-                  <div className="empty-guided">
-                    <p className="empty-copy">No clients due this week.</p>
-                    <div className="actions-row">
-                      <button className="button button-secondary compact-button" onClick={() => setView('clients')} type="button">
-                        Review client list
-                      </button>
+                    )}
+                  </div>
+                </section>
+
+                <section className="panel card panel-span-2">
+                  <div className="section-heading compact">
+                    <div>
+                      <span className="eyebrow">Trends</span>
+                      <h2>Session volume and load (last 6 weeks)</h2>
                     </div>
                   </div>
-                )}
-              </div>
-            </section>
-
-            <section className="panel card panel-span-2">
-              <div className="section-heading compact">
-                <div>
-                  <span className="eyebrow">Trends</span>
-                  <h2>Session volume and load (last 6 weeks)</h2>
-                </div>
-              </div>
-              <div className="trend-list">
-                {sessionTrendRows.length ? (
-                  sessionTrendRows.map((row) => (
-                    <article className="trend-row" key={row.label}>
-                      <strong>{row.label}</strong>
-                      <span>{row.completedSets} sets</span>
-                      <span>{row.totalReps} reps</span>
-                      <span>{Math.round(row.totalLoadKg)} kg load</span>
-                      <div className="trend-bar-track">
-                        <div className="trend-bar-fill" style={{ width: `${Math.max((row.totalLoadKg / maxTrendLoad) * 100, 6)}%` }} />
+                  <div className="trend-list">
+                    {sessionTrendRows.length ? (
+                      sessionTrendRows.map((row) => (
+                        <article className="trend-row" key={row.label}>
+                          <strong>{row.label}</strong>
+                          <span>{row.completedSets} sets</span>
+                          <span>{row.totalReps} reps</span>
+                          <span>{Math.round(row.totalLoadKg)} kg load</span>
+                          <div className="trend-bar-track">
+                            <div className="trend-bar-fill" style={{ width: `${Math.max((row.totalLoadKg / maxTrendLoad) * 100, 6)}%` }} />
+                          </div>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="empty-guided">
+                        <p className="empty-copy">Save sessions with set weight to see load trends.</p>
+                        <div className="actions-row">
+                          <button className="button button-secondary compact-button" onClick={() => setView('session')} type="button">
+                            Run and save a session
+                          </button>
+                        </div>
                       </div>
-                    </article>
-                  ))
-                ) : (
-                  <div className="empty-guided">
-                    <p className="empty-copy">Save sessions with set weight to see load trends.</p>
-                    <div className="actions-row">
-                      <button className="button button-secondary compact-button" onClick={() => setView('session')} type="button">
-                        Run and save a session
-                      </button>
+                    )}
+                  </div>
+                </section>
+
+                <section className="panel card panel-span-2">
+                  <div className="section-heading compact">
+                    <div>
+                      <span className="eyebrow">Analytics</span>
+                      <h2>Coaching metrics at a glance</h2>
                     </div>
                   </div>
-                )}
-              </div>
-            </section>
-
-            <section className="panel card panel-span-2">
-              <div className="section-heading compact">
-                <div>
-                  <span className="eyebrow">Analytics</span>
-                  <h2>Coaching metrics at a glance</h2>
-                </div>
-              </div>
-              <div className="stats-grid">
-                {analyticsCards.map((card) => (
-                  <article className="stat-card" key={card.label}>
-                    <span className="stat-label">{card.label}</span>
-                    <strong>{card.value}</strong>
-                    <span className="stat-note">{card.note}</span>
-                  </article>
-                ))}
-              </div>
-            </section>
+                  <div className="stats-grid">
+                    {analyticsCards.map((card) => (
+                      <article className="stat-card" key={card.label}>
+                        <span className="stat-label">{card.label}</span>
+                        <strong>{card.value}</strong>
+                        <span className="stat-note">{card.note}</span>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </>
+            ) : null}
           </>
         ) : null}
 

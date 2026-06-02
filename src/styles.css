@@ -518,6 +518,27 @@ select:focus-visible,
   margin-bottom: 14px;
 }
 
+.dashboard-disclosure-panel {
+  background: rgba(2, 6, 23, 0.28);
+}
+
+.dashboard-disclosure-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.dashboard-disclosure-row h3 {
+  margin: 6px 0 6px;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.dashboard-disclosure-row .section-copy {
+  margin: 0;
+}
+
 .recent-edits-filter-group {
   display: flex;
   flex-wrap: wrap;
@@ -1265,7 +1286,8 @@ select:focus-visible,
   .trend-row,
   .session-set-actions,
   .exercise-editor-header,
-  .exercise-block-top {
+  .exercise-block-top,
+  .dashboard-disclosure-row {
     flex-direction: column;
     align-items: start;
   }
